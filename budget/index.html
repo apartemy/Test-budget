@@ -131,7 +131,7 @@
 
 </div>
 
-<div class="veil" id="veil"><div class="panel">
+<div class="veil" id="veil"><div class="panel" id="panelBox" role="dialog" aria-modal="true" aria-labelledby="pTitle" tabindex="-1">
   <h3 id="pTitle">Bewerken</h3>
 
   <div class="field hidden" id="fType">
@@ -220,11 +220,11 @@
   <button type="button" class="dangerlink" id="pDelete" style="display:none;">Verwijderen</button>
 </div></div>
 
-<div class="calveil" id="calveil"><div class="cal">
+<div class="calveil" id="calveil"><div class="cal" id="calBox" role="dialog" aria-modal="true" aria-labelledby="cTitle" tabindex="-1">
   <div class="calhead">
-    <button class="navbtn" id="cPrev">‹</button>
+    <button class="navbtn" id="cPrev" aria-label="Vorige maand">‹</button>
     <div class="t" id="cTitle"></div>
-    <button class="navbtn" id="cNext">›</button>
+    <button class="navbtn" id="cNext" aria-label="Volgende maand">›</button>
   </div>
   <div class="dow" id="cDow"></div>
   <div class="grid" id="cGrid"></div>
@@ -234,7 +234,7 @@
   </div>
 </div></div>
 
-<div class="toast" id="toast"><span id="toastMsg"></span><button id="toastAct">Ongedaan maken</button></div>
+<div class="toast" id="toast" role="status" aria-live="polite"><span id="toastMsg"></span><button id="toastAct">Ongedaan maken</button></div>
 
 <script src="app.js" defer></script>
 </body>

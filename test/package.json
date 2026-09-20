@@ -1,0 +1,11 @@
+{
+  "name": "budget-tests",
+  "private": true,
+  "description": "Browsertests voor de budget-app. Staat bewust in een eigen map, zodat Netlify in de repo-root geen Node-project ziet en niets probeert te bouwen.",
+  "scripts": {
+    "test": "node run.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.1"
+  }
+}

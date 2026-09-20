@@ -412,13 +412,61 @@ function expRow(x){
     '<div class="ramt num">'+eur(x.amount)+"</div></div>";
 }
 
+/* ---------- dialoogbeheer ----------
+   Beide overlays (bewerkscherm en kalender) delen dit: achtergrond
+   vastzetten, focus binnen het venster houden, Escape sluit, en bij
+   sluiten gaat de focus terug naar de knop die het venster opende.
+   De kalender kan bovenop het bewerkscherm liggen, vandaar een stapel. */
+const dialogs=[];
+const FOCUSABLE='button:not([disabled]),input:not([disabled]),select:not([disabled]),[href],[tabindex]:not([tabindex="-1"])';
+
+function enterDialog(veilId,boxId){
+  const veil=$(veilId), box=$(boxId);
+  /* al open: alleen opnieuw scherpstellen, geen tweede laag op de stapel */
+  if(!dialogs.some(d=>d.veil===veil)){
+    dialogs.push({veil:veil,box:box,opener:document.activeElement});
+  }
+  veil.classList.add("open");
+  document.body.classList.add("locked");
+  box.focus();
+}
+function leaveDialog(veilId){
+  const veil=$(veilId);
+  veil.classList.remove("open");
+  const i=dialogs.findIndex(d=>d.veil===veil);
+  const gone=i>=0?dialogs.splice(i,1)[0]:null;
+  if(!dialogs.length)document.body.classList.remove("locked");
+  /* de opener kan intussen weggerenderd zijn, dan laten we de focus los */
+  if(gone&&gone.opener&&gone.opener.isConnected&&gone.opener.focus)gone.opener.focus();
+  else if(dialogs.length)dialogs[dialogs.length-1].box.focus();
+}
+function visibleFocusable(box){
+  return Array.from(box.querySelectorAll(FOCUSABLE)).filter(el=>el.offsetParent!==null);
+}
+document.addEventListener("keydown",e=>{
+  if(!dialogs.length)return;
+  const top=dialogs[dialogs.length-1];
+  if(e.key==="Escape"){
+    e.preventDefault();
+    if(top.veil.id==="calveil")closeCal();else closePanel();
+    return;
+  }
+  if(e.key!=="Tab")return;
+  const items=visibleFocusable(top.box);
+  if(!items.length){e.preventDefault();top.box.focus();return;}
+  const first=items[0], last=items[items.length-1];
+  const here=document.activeElement;
+  if(e.shiftKey&&(here===first||here===top.box)){e.preventDefault();last.focus();}
+  else if(!e.shiftKey&&here===last){e.preventDefault();first.focus();}
+});
+
 /* ---------- kalender ---------- */
 let calCtx=null, calMonth=null;
 function openCal(opts){
   calCtx=opts;
   calMonth=opts.value?ymOfDate(fromISO(opts.value)):(opts.month||view);
-  $("calveil").classList.add("open");
   drawCal();
+  enterDialog("calveil","calBox");
 }
 function drawCal(){
   const grid=$("cGrid"), dow=$("cDow"), title=$("cTitle");
@@ -450,7 +498,7 @@ function drawCal(){
   grid.innerHTML=h;
   $("cClear").style.display=calCtx.clearable===false?"none":"";
 }
-function closeCal(){$("calveil").classList.remove("open");calCtx=null;}
+function closeCal(){if(!calCtx)return;calCtx=null;leaveDialog("calveil");}
 /* geeft de gekozen waarde door en sluit; calCtx is daarna leeg */
 function pickCal(val){const f=calCtx.onPick;closeCal();f(val);}
 $("cPrev").onclick=()=>{calMonth=ymShift(calMonth,-1);drawCal();};
@@ -582,7 +630,7 @@ function openPanel(kind,id){
   const removable=["income","expense","oneincome","oneexpense","cat","sav"].includes(kind);
   $("pDelete").style.display=removable?"block":"none";
   syncDateFields();
-  $("veil").classList.add("open");
+  enterDialog("veil","panelBox");
 }
 function defaultDate(){
   return (view===TODAY_YM)?isoOf(NOW):(ymParse(view).y+"-"+pad(ymParse(view).m+1)+"-01");
@@ -624,7 +672,7 @@ function syncDateFields(){
   $("excClear").style.display=edit.exc?"":"none";
   $("dayHint").style.display=(k==="income"||k==="newincome")?"":"none";
 }
-function closePanel(){$("veil").classList.remove("open");edit=null;}
+function closePanel(){if(!edit)return;edit=null;leaveDialog("veil");}
 
 function savePanel(){
   clearErrors();
@@ -812,7 +860,18 @@ $("txAdd").onclick=()=>{
   editM(view).tx.push({id:uid(),label:d,amount:a,cat:$("txCat").value,date:date,pay:txPay});
   $("txDesc").value="";$("txAmt").value="";txDate=null;
   save();render();
+  $("txDesc").focus();
 };
+
+/* Enter bevestigt, zodat je op een telefoon het toetsenbord niet hoeft
+   weg te tikken om op de knop te komen */
+function submitOnEnter(ids,fire){
+  ids.forEach(id=>$(id).addEventListener("keydown",e=>{
+    if(e.key==="Enter"){e.preventDefault();fire();}
+  }));
+}
+submitOnEnter(["txDesc","txAmt"],()=>$("txAdd").click());
+submitOnEnter(["pLabel","pAmount","pCash","pTerm","pGoal"],()=>$("pSave").click());
 
 document.body.addEventListener("click",e=>{
   const t=e.target.closest("[data-toggle]");
