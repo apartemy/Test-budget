@@ -8,6 +8,7 @@ volgende wijzigingen opnieuw te kunnen aantonen.
 | --- | --- |
 | `mechanics.test.js` | Elke functie van de app: inkomsten en lasten, maandelijks en eenmalig, afvinken, overslaan, afwijkende datum, categorieën met en zonder budget, boekingen op rekening en contant, spaardoelen vrij en met vaste termijn, stortingen, verwijderen met ongedaan maken, beginsaldo, de doorrekening over maanden heen, en of alles een herlaadbeurt overleeft. |
 | `keyboard.test.js` | Focus, Escape, Tab binnen het venster, achtergrondvergrendeling en Enter als bevestiging. |
+| `offline.test.js` | Of de service worker zich registreert, of de app-shell inclusief `app.css` en `app.js` in de cache staat, of caches van oudere versies zijn opgeruimd, en of de app zonder internet nog opstart. De verwachte cachenaam leest hij uit `sw.js`, dus een versieverhoging breekt deze test niet. |
 
 ## Draaien
 
