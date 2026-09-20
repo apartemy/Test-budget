@@ -100,24 +100,45 @@ function check(name, cond, extra) {
   check('sav: term hides balance field', !(await page.isVisible('#fAmount')));
   await page.fill('#pTerm', '6');
   await page.click('#pSave');
-  await page.click('.depadd >> nth=0');
-  await page.fill('#pAmount', '200');
-  await page.click('#pSave');
-  await page.click('.depadd >> nth=0');
-  await page.fill('#pAmount', '300');
-  await page.click('#pSave');
-  check('sav: term balance 500', (await page.textContent('#savList')).includes('€500,00'), await page.textContent('#savList'));
-  check('sav: 6 mnd vast tag', (await page.textContent('#savList')).includes('6 mnd vast'));
-  check('sav: release date shown', (await page.textContent('#savList')).includes('Eerstvolgende vrijval'));
-  check('sav: 2 deposit rows', (await page.locator('.dep').count()) === 2);
+  // Elk spaardoel heeft nu een eigen boekknop, dus selecteer op naam.
+  const savCard = name => page.locator('.sav').filter({ hasText: name });
+  const deposit = async (name, amount, opts = {}) => {
+    await savCard(name).locator('.depadd').click();
+    await page.fill('#pAmount', amount);
+    if (opts.withdraw) await page.click('#segDO');
+    if (opts.cash) await page.click('#segPC');
+    await page.click('#pSave');
+  };
+  await deposit('Depositio', '200');
+  await deposit('Depositio', '300');
+  const depositio = savCard('Depositio');
+  check('sav: term balance 500', (await depositio.textContent()).includes('€500,00'), await depositio.textContent());
+  check('sav: 6 mnd vast tag', (await depositio.textContent()).includes('6 mnd vast'));
+  check('sav: release date shown', (await depositio.textContent()).includes('Eerstvolgende vrijval'));
+  check('sav: 2 deposit rows', (await depositio.locator('.dep').count()) === 2);
   check('savTot: shows this-month portion', (await page.textContent('#savTot')).includes('deze maand'), await page.textContent('#savTot'));
 
-  // ---- undo a deposit delete
-  await page.click('.dep .x >> nth=0');
-  check('undo: toast visible', await page.isVisible('#toast.show'));
-  check('undo: one deposit left', (await page.locator('.dep').count()) === 1);
+  // ---- free savings now move real money
+  const availBefore = await page.textContent('#heroBig');
+  await deposit('Buffer', '250');
+  check('free sav: balance grew', (await savCard('Buffer').textContent()).includes('€1.750,00'), await savCard('Buffer').textContent());
+  check('free sav: deposit is listed', (await savCard('Buffer').locator('.dep').count()) === 1);
+  check('free sav: available money dropped', (await page.textContent('#heroBig')) !== availBefore);
+  await deposit('Buffer', '50', { withdraw: true });
+  check('free sav: withdrawal lowers the balance', (await savCard('Buffer').textContent()).includes('€1.700,00'), await savCard('Buffer').textContent());
+  check('free sav: withdrawal is marked', (await savCard('Buffer').textContent()).includes('opgenomen'));
+  await savCard('Buffer').locator('.dep .x').first().click();
+  check('free sav: deleting a booking reverses the balance',
+    !(await savCard('Buffer').textContent()).includes('€1.700,00'), await savCard('Buffer').textContent());
   await page.click('#toastAct');
-  check('undo: deposit restored', (await page.locator('.dep').count()) === 2);
+  check('free sav: undo restores it', (await savCard('Buffer').textContent()).includes('€1.700,00'));
+
+  // ---- undo a deposit delete
+  await depositio.locator('.dep .x').first().click();
+  check('undo: toast visible', await page.isVisible('#toast.show'));
+  check('undo: one deposit left', (await depositio.locator('.dep').count()) === 1);
+  await page.click('#toastAct');
+  check('undo: deposit restored', (await depositio.locator('.dep').count()) === 2);
 
   // ---- skip an item for this month
   await page.click('#expList .rinfo.tap >> nth=0');
@@ -178,12 +199,28 @@ function check(name, cond, extra) {
   const exported = await page.evaluate(() => localStorage.getItem('budget_v8'));
   check('persist: state written to localStorage', exported && exported.length > 100);
 
-  // ---- delete with undo
+  // ---- deleting an unused category needs no questions
   await page.click('#catList .cat >> nth=3');
   await page.click('#pDelete');
-  check('delete: category gone', (await page.locator('#catList .cat').count()) === 3);
+  check('delete: unused category goes straight away', (await page.locator('#catList .cat').count()) === 3);
   await page.click('#toastAct');
   check('delete: undo restored category', (await page.locator('#catList .cat').count()) === 4);
+
+  // ---- deleting a used category asks where its bookings go
+  await page.click('#catList .cat >> nth=0');           // Boodschappen, has a booking
+  await page.click('#pDelete');
+  check('delete: used category opens the question', await page.isVisible('#askveil.open'));
+  check('delete: the question offers a target', await page.isVisible('#fMove'));
+  await page.selectOption('#askSelect', { index: 0 });
+  const movedTo = await page.evaluate(() => document.getElementById('askSelect').selectedOptions[0].textContent);
+  await page.click('#askYes');
+  check('delete: category removed', (await page.locator('#catList .cat').count()) === 3);
+  check('delete: booking moved, not orphaned',
+    !(await page.textContent('#txList')).includes('zonder categorie'), await page.textContent('#txList'));
+  check('delete: booking sits under the chosen category',
+    (await page.textContent('#txList')).includes(movedTo), [movedTo, await page.textContent('#txList')]);
+  await page.click('#toastAct');
+  check('delete: undo brings the category back', (await page.locator('#catList .cat').count()) === 4);
 
   // ---- survives reload
   await page.reload();

@@ -209,8 +209,16 @@ details.settings[open] summary::after{content:"–";}
 .ghost:active{background:rgba(246,237,230,.1);}
 .ghost.danger{color:var(--wine-soft);}
 .setnote{font-size:12px;color:var(--on-dark-soft);line-height:1.45;}
+.setnote.warn{color:#E8C07A;}
 .setrow .dim{color:var(--on-dark-soft);}
 .setrow .pair{display:flex;gap:8px;}
+.setrow .seg{flex:0 1 300px;}
+.setrow .seg button{padding:7px 4px;font-size:12px;}
+/* stipje op de instellingenkop zolang er iets te doen is, zonder te zeuren */
+.nudge{
+  display:inline-block;width:7px;height:7px;border-radius:50%;
+  background:var(--warn);margin-left:7px;vertical-align:middle;
+}
 
 .veil{
   display:none;position:fixed;inset:0;background:rgba(20,5,9,.62);z-index:900;
@@ -221,14 +229,15 @@ details.settings[open] summary::after{content:"–";}
   background:var(--cream);color:var(--ink);width:100%;max-width:640px;
   border-radius:16px 16px 0 0;padding:22px 18px;
   padding-bottom:calc(22px + env(safe-area-inset-bottom,0px));
-  max-height:88vh;overflow-y:auto;animation:up .24s ease-out;
+  max-height:88vh;max-height:88dvh;overflow-y:auto;animation:up .24s ease-out;
 }
+.panel .note{font-size:13px;color:var(--ink-soft);line-height:1.45;margin:-6px 0 16px;}
 @keyframes up{from{transform:translateY(100%);}to{transform:translateY(0);}}
 .panel h3{font-family:var(--serif);font-size:19px;font-weight:500;margin:0 0 16px;}
 .field{margin-bottom:14px;}
 .field.hidden{display:none;}
 .field label{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:5px;}
-.field input,.pickbtn{
+.field input,.field select,.pickbtn{
   width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;
   background:var(--cream-2);color:var(--ink);font-size:15px;font-family:inherit;
 }
@@ -253,6 +262,7 @@ details.settings[open] summary::after{content:"–";}
 .acts button{flex:1;padding:12px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;}
 .acts .ok{background:var(--wine);color:var(--cream);border:1px solid var(--wine);}
 .acts .no{background:transparent;color:var(--ink);border:1px solid var(--line-strong);}
+.acts .ok.danger{background:var(--danger);border-color:var(--danger);}
 .dangerlink{
   width:100%;margin-top:12px;padding:10px;border:none;background:none;
   color:var(--danger);font-size:13px;font-weight:600;cursor:pointer;

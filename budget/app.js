@@ -4,6 +4,9 @@
 const MONTHS=["januari","februari","maart","april","mei","juni","juli","augustus","september","oktober","november","december"];
 const DOW=["ma","di","wo","do","vr","za","zo"];
 const KEY="budget_v8";
+const THEMES=["system","light","dark"];
+/* na zoveel dagen zonder export vraagt de app er in de instellingen om */
+const EXPORT_STALE_DAYS=30;
 
 const $=id=>document.getElementById(id);
 const pad=n=>String(n).padStart(2,"0");
@@ -42,6 +45,8 @@ const withCash=(total,cash,suffix)=>cash>0?eur(total)+"  ·  "+eur(cash)+suffix:
 /* ---------- startgegevens ---------- */
 function seed(){return{
   v:8,
+  theme:"system",
+  lastExport:null,
   income:[],
   expenses:[],
   categories:[
@@ -54,22 +59,40 @@ function seed(){return{
   months:{}
 }}
 
+const blankMonth=()=>({start:null,paid:{},recv:{},exc:{},skip:{},oneoff:[],tx:[]});
+
+/* zet rehomeTx als er echt iets verhuisd is, zodat de schijf ook bijtrekt
+   en een export de nieuwe indeling meeneemt */
+let migrated=false;
+let loadFailed=false;
 let state=load();
+if(migrated)save();
 
 function load(){
+  let raw=null;
+  try{raw=localStorage.getItem(KEY);}catch(e){}
+  if(!raw)return seed();
   try{
-    const raw=localStorage.getItem(KEY);
-    if(raw){const d=JSON.parse(raw);return fix(d);}
-  }catch(e){}
-  return seed();
+    return fix(JSON.parse(raw));
+  }catch(e){
+    /* Nooit stilletjes met een lege app verder: dan denkt iemand dat zijn
+       gegevens weg zijn en schrijft de eerstvolgende bewerking ze echt weg. */
+    loadFailed=true;
+    return seed();
+  }
 }
 function fix(d){
   d.income=d.income||[];d.expenses=d.expenses||[];
   d.categories=d.categories||[];d.savings=d.savings||[];d.months=d.months||{};
+  if(!THEMES.includes(d.theme))d.theme="system";
+  if(typeof d.lastExport!=="string")d.lastExport=null;
   d.expenses.forEach(e=>{if(!e.pay)e.pay="digital";});
   d.savings.forEach(sv=>{
     if(!sv.kind)sv.kind="free";
     if(sv.kind==="term"){sv.deposits=sv.deposits||[];sv.termMonths=sv.termMonths||12;}
+    /* vrij opneembare rekeningen houden losse bij- en afboekingen bij, zodat
+       geld dat naar sparen gaat ook echt uit je beschikbare saldo verdwijnt */
+    else sv.movements=sv.movements||[];
   });
   Object.keys(d.months).forEach(k=>{
     const m=d.months[k];
@@ -80,13 +103,33 @@ function fix(d){
     m.tx.forEach(t=>{if(!t.pay)t.pay="digital";});
     if(typeof m.start==="number")m.start={d:m.start,c:0};
   });
+  rehomeTx(d);
   return d;
+}
+/* Boekingen hoorden vroeger bij de maand die je toevallig openhad, niet bij
+   hun eigen datum. Zet ze alsnog in de juiste maand; draait bij elke lading
+   en doet daarna niets meer. */
+function rehomeTx(d){
+  const moves=[];
+  Object.keys(d.months).forEach(k=>{
+    d.months[k].tx=d.months[k].tx.filter(t=>{
+      if(!t.date)return true;
+      const home=ymOfDate(fromISO(t.date));
+      if(home===k)return true;
+      moves.push({home:home,tx:t});
+      return false;
+    });
+  });
+  moves.forEach(mv=>{
+    if(!d.months[mv.home])d.months[mv.home]=blankMonth();
+    d.months[mv.home].tx.push(mv.tx);
+  });
+  if(moves.length)migrated=true;
 }
 function save(){
   try{localStorage.setItem(KEY,JSON.stringify(state));}
   catch(e){toast("Opslaan lukt niet. De opslag is vol of je bent in privémodus.",null);}
 }
-const blankMonth=()=>({start:null,paid:{},recv:{},exc:{},skip:{},oneoff:[],tx:[]});
 function readM(k){return state.months[k]||blankMonth();}
 function editM(k){if(!state.months[k])state.months[k]=blankMonth();return state.months[k];}
 
@@ -104,6 +147,11 @@ function addMonths(d,n){
   return x;
 }
 function depositsOf(sv){return (sv.kind==="term")?(sv.deposits||[]):[];}
+function movementsOf(sv){return (sv.kind==="term")?[]:(sv.movements||[]);}
+/* elke geldstroom van of naar een spaarrekening, met teken: bij een vaste
+   termijn zijn dat de stortingen, bij een vrije rekening de bij- en
+   afboekingen. Alleen deze tellen mee in de maandberekening. */
+function flowsOf(sv){return sv.kind==="term"?depositsOf(sv):movementsOf(sv);}
 function savBalance(sv){
   if(sv.kind==="term")return depositsOf(sv).reduce((s,x)=>s+x.amount,0);
   return sv.amount||0;
@@ -192,11 +240,11 @@ function calc(k,depth){
   const varD=m.tx.reduce((s,t)=>s+(t.pay==="cash"?0:t.amount),0);
   const varC=m.tx.reduce((s,t)=>s+(t.pay==="cash"?t.amount:0),0);
   let savD=0,savC=0,savMonth=0;
-  state.savings.forEach(sv=>depositsOf(sv).forEach(dp=>{
-    const dd=fromISO(dp.date);
+  state.savings.forEach(sv=>flowsOf(sv).forEach(fl=>{
+    const dd=fromISO(fl.date);
     if(!dd||ymOfDate(dd)!==k)return;
-    savMonth+=dp.amount;
-    if(dp.pay==="cash")savC+=dp.amount;else savD+=dp.amount;
+    savMonth+=fl.amount;
+    if(fl.pay==="cash")savC+=fl.amount;else savD+=fl.amount;
   }));
   const start=startBalance(k,depth||0);
 
@@ -351,11 +399,29 @@ function render(){
         h+="</div>";
       }
       h+='<button class="depadd" data-newdep="'+sv.id+'">Storting toevoegen</button>';
+    }else{
+      const mv=movementsOf(sv).slice().sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+      if(mv.length){
+        h+='<div class="deps">';
+        mv.forEach(fl=>{
+          const dd=fromISO(fl.date);
+          h+='<div class="dep"><div class="di">'+dayLabel(dd)+" "+dd.getFullYear()+
+            (fl.pay==="cash"?' <span class="tag cash">contant</span>':"")+
+            '<div class="dm">'+(fl.amount<0?"opgenomen":"ingelegd")+"</div></div>"+
+            '<div class="da num'+(fl.amount<0?" neg":"")+'">'+eur(fl.amount)+"</div>"+
+            '<button class="x" data-deldep="'+sv.id+'" data-id="'+fl.id+'" aria-label="Verwijder boeking">×</button></div>';
+        });
+        h+="</div>";
+      }
+      h+='<button class="depadd" data-newdep="'+sv.id+'">Inleg of opname boeken</button>';
     }
     h+="</div>";
   });
   $("savList").innerHTML=h||'<div class="empty">Nog geen spaardoel. Voeg er een toe, vrij opneembaar of met een vaste looptijd.</div>';
-  $("savTot").textContent=withCash(savSum,c.savMonth," deze maand");
+  /* deze maand kan ook negatief zijn, dan is er netto geld uit sparen gehaald */
+  $("savTot").textContent=c.savMonth===0
+    ? eur(savSum)
+    : eur(savSum)+"  ·  "+eur(c.savMonth)+" deze maand";
 
   /* instellingen */
   $("startMonthLbl").textContent=ymLabel(k);
@@ -366,8 +432,35 @@ function render(){
     ? "Handmatig ingesteld. Dit is het bedrag waarmee de maand begint."
     : "Automatisch overgenomen uit de vorige maand. Tik om je werkelijke saldo in te vullen.";
 
+  const theme=THEMES.includes(state.theme)?state.theme:"system";
+  $("thSystem").classList.toggle("on",theme==="system");
+  $("thLight").classList.toggle("on",theme==="light");
+  $("thDark").classList.toggle("on",theme==="dark");
+
+  const stale=exportIsStale();
+  $("exportNote").textContent=state.lastExport
+    ? "Laatst geëxporteerd op "+fullDate(fromISO(state.lastExport))+(stale?". Dat is alweer even geleden.":".")
+    : (hasAnyData()?"Nog nooit geëxporteerd.":"");
+  $("exportNote").className="setnote"+(stale?" warn":"");
+  $("setNudge").style.display=stale?"inline-block":"none";
+
   $("txDate").innerHTML=txDate?dayLabel(fromISO(txDate)):'<span class="ph">Datum</span>';
   $("txPay").textContent=txPay==="cash"?"Contant":"Rekening";
+}
+
+function hasAnyData(){
+  return !!(state.income.length||state.expenses.length||state.savings.length||
+    Object.keys(state.months).some(k=>{
+      const m=state.months[k];
+      return m.tx.length||m.oneoff.length||m.start;
+    }));
+}
+/* pas zeuren als er iets te verliezen valt */
+function exportIsStale(){
+  if(!hasAnyData())return false;
+  if(!state.lastExport)return true;
+  const days=(NOW-startOfDay(fromISO(state.lastExport)))/86400000;
+  return days>EXPORT_STALE_DAYS;
 }
 
 /* bedrag plus de negatief-opmaak in één keer */
@@ -403,7 +496,7 @@ function incRow(x,isGot){
 function expRow(x){
   const excTag=x.exc?' <span class="tag exc">afwijkend</span>':"";
   const cashTag=x.pay==="cash"?' <span class="tag cash">contant</span>':"";
-  const sub=x.date?dayLabel(x.date):"Geen datum";
+  const sub=x.date?dayLabel(x.date)+(x.ref.shift?" · schuift bij weekend":""):"Geen datum";
   return '<div class="row'+(x.paid?" done":"")+'">'+
     '<button class="check'+(x.paid?" on":"")+'" data-toggle="paid" data-id="'+x.id+
     '" aria-pressed="'+(x.paid?"true":"false")+'" aria-label="Markeer als betaald">✓</button>'+
@@ -420,11 +513,11 @@ function expRow(x){
 const dialogs=[];
 const FOCUSABLE='button:not([disabled]),input:not([disabled]),select:not([disabled]),[href],[tabindex]:not([tabindex="-1"])';
 
-function enterDialog(veilId,boxId){
+function enterDialog(veilId,boxId,closeFn){
   const veil=$(veilId), box=$(boxId);
   /* al open: alleen opnieuw scherpstellen, geen tweede laag op de stapel */
   if(!dialogs.some(d=>d.veil===veil)){
-    dialogs.push({veil:veil,box:box,opener:document.activeElement});
+    dialogs.push({veil:veil,box:box,close:closeFn,opener:document.activeElement});
   }
   veil.classList.add("open");
   document.body.classList.add("locked");
@@ -448,7 +541,7 @@ document.addEventListener("keydown",e=>{
   const top=dialogs[dialogs.length-1];
   if(e.key==="Escape"){
     e.preventDefault();
-    if(top.veil.id==="calveil")closeCal();else closePanel();
+    top.close();
     return;
   }
   if(e.key!=="Tab")return;
@@ -466,7 +559,7 @@ function openCal(opts){
   calCtx=opts;
   calMonth=opts.value?ymOfDate(fromISO(opts.value)):(opts.month||view);
   drawCal();
-  enterDialog("calveil","calBox");
+  enterDialog("calveil","calBox",closeCal);
 }
 function drawCal(){
   const grid=$("cGrid"), dow=$("cDow"), title=$("cTitle");
@@ -531,6 +624,35 @@ function withUndo(msg,fn){
   toast(msg,()=>{state=JSON.parse(snap);save();render();});
 }
 
+/* ---------- bevestigen ----------
+   Vervangt confirm(): dat blokkeert de pagina en ziet er op een telefoon
+   uit alsof het bij de browser hoort in plaats van bij de app. Kan ook een
+   keuzelijst tonen, bijvoorbeeld om boekingen te verhuizen. */
+let askCtx=null;
+function ask(opts){
+  askCtx=opts;
+  $("askTitle").textContent=opts.title;
+  $("askBody").textContent=opts.body||"";
+  $("askBody").style.display=opts.body?"":"none";
+  $("askYes").textContent=opts.okLabel||"Doorgaan";
+  $("askYes").className="ok"+(opts.danger?" danger":"");
+  const choices=opts.choices||[];
+  show("fMove",choices.length>0);
+  if(choices.length){
+    $("lblMove").textContent=opts.choiceLabel||"Verplaatsen naar";
+    $("askSelect").innerHTML=choices.map(c=>'<option value="'+esc(c.value)+'">'+esc(c.label)+"</option>").join("");
+  }
+  enterDialog("askveil","askBox",closeAsk);
+}
+function closeAsk(){if(!askCtx)return;askCtx=null;leaveDialog("askveil");}
+$("askNo").onclick=closeAsk;
+$("askYes").onclick=()=>{
+  const fn=askCtx.onOk, value=$("askSelect").value;
+  closeAsk();
+  fn(value);
+};
+$("askveil").addEventListener("click",e=>{if(e.target.id==="askveil")closeAsk();});
+
 /* ---------- bewerkscherm ---------- */
 let edit=null;
 function show(id,on){$(id).classList.toggle("hidden",!on);}
@@ -544,7 +666,7 @@ function openPanel(kind,id){
   const family=(kind==="newone")?(id==="income"?"income":"expense"):(FAM[kind]||null);
   edit={kind:kind,id:id,family:family,day:null,date:null,exc:null,ckind:"digital",pay:"digital",shift:false,skip:false,rec:true};
   const m=readM(view);
-  ["fType","fLabel","fAmount","fKind","fPay","fCash","fDay","fDate","fShift","fExc","fSkip","fGoal","fSavKind","fTerm"].forEach(f=>show(f,false));
+  ["fType","fLabel","fAmount","fKind","fPay","fCash","fDay","fDate","fShift","fExc","fSkip","fGoal","fSavKind","fTerm","fDir"].forEach(f=>show(f,false));
   $("excMonth").textContent=ymLabel(view);
   $("pLabel").value="";$("pAmount").value="";$("pGoal").value="";$("pCash").value="";$("pTerm").value="";
 
@@ -571,9 +693,10 @@ function openPanel(kind,id){
     if(it){
       $("pLabel").value=it.label;$("pAmount").value=toInput(it.amount);
       edit.day=it.day;edit.exc=m.exc[it.id]||null;edit.skip=!!m.skip[it.id];edit.pay=it.pay||"digital";
+      edit.shift=!!it.shift;
       show("fExc",true);show("fSkip",true);
     }else{edit.day=1;}
-    setPay(edit.pay);setSkip(edit.skip);
+    setPay(edit.pay);setSkip(edit.skip);setShift(edit.shift);
   }
   else if(kind==="oneincome"||kind==="oneexpense"||kind==="newone"){
     const it=(kind==="newone")?null:m.oneoff.find(x=>x.id===id);
@@ -612,13 +735,17 @@ function openPanel(kind,id){
   }
   else if(kind==="newdep"){
     const sv=state.savings.find(x=>x.id===id);
+    const term=sv&&sv.kind==="term";
     edit.savId=id;
-    $("pTitle").textContent="Storting op "+(sv?sv.label:"spaarrekening");
+    edit.savKind=term?"term":"free";
+    $("pTitle").textContent=(term?"Storting op ":"Boeking op ")+(sv?sv.label:"spaarrekening");
     $("lblAmount").textContent="Bedrag";
     show("fAmount",true);show("fDate",true);show("fPay",true);
+    /* een vaste termijn kent alleen stortingen, een vrije rekening ook opnames */
+    show("fDir",!term);
     edit.rec=false;
     edit.date=defaultDate();
-    setPay("digital");
+    setPay("digital");setDir(1);
   }
   else if(kind==="start"){
     $("pTitle").textContent="Beginsaldo "+ymLabel(view);
@@ -630,7 +757,7 @@ function openPanel(kind,id){
   const removable=["income","expense","oneincome","oneexpense","cat","sav"].includes(kind);
   $("pDelete").style.display=removable?"block":"none";
   syncDateFields();
-  enterDialog("veil","panelBox");
+  enterDialog("veil","panelBox",closePanel);
 }
 function defaultDate(){
   return (view===TODAY_YM)?isoOf(NOW):(ymParse(view).y+"-"+pad(ymParse(view).m+1)+"-01");
@@ -645,6 +772,7 @@ function setKind(k){edit.ckind=k;setSegPair("segD","segC",k==="cash");}
 function setPay(k){edit.pay=k;setSegPair("segPD","segPC",k==="cash");}
 function setShift(v){edit.shift=v;setSegPair("segSN","segSY",v);}
 function setSkip(v){edit.skip=v;setSegPair("segKA","segKS",v);}
+function setDir(sign){edit.dir=sign;setSegPair("segDI","segDO",sign<0);}
 function setSavKind(k){
   edit.savKind=k;
   setSegPair("segSF","segST",k==="term");
@@ -652,7 +780,7 @@ function setSavKind(k){
   show("fAmount",k!=="term");
   $("savKindHint").textContent=(k==="term")
     ? "Je voegt losse stortingen toe. Elke storting staat vanaf zijn eigen datum vast en krijgt een eigen vrijvaldatum."
-    : "Je houdt één saldo bij dat je zelf aanpast.";
+    : "Je boekt inleg en opnames, die gaan van je beschikbare geld af of komen erbij. Het saldo hier aanpassen geldt als correctie en verandert je maand niet.";
 }
 function syncDateFields(){
   if(!edit)return;
@@ -665,7 +793,7 @@ function syncDateFields(){
   if(!scheduled)return;
   show("fDay",edit.rec);
   show("fDate",!edit.rec);
-  show("fShift",edit.rec&&(k==="income"||k==="newincome")&&!!edit.day);
+  show("fShift",edit.rec&&!!edit.day);
   $("pDay").innerHTML=edit.day?("Dag "+edit.day):'<span class="ph">Geen vaste dag</span>';
   $("pDate").innerHTML=edit.date?dayLabel(fromISO(edit.date)):'<span class="ph">Vandaag</span>';
   $("pExc").innerHTML=edit.exc?dayLabel(fromISO(edit.exc)):'<span class="ph">Geen afwijking</span>';
@@ -692,9 +820,20 @@ function savePanel(){
     if(amt===null||amt<=0){fail("fAmount");return;}
     const sv=state.savings.find(x=>x.id===edit.savId);
     const iso=edit.date||defaultDate();
-    if(sv){sv.deposits=sv.deposits||[];sv.deposits.push({id:uid(),amount:amt,date:iso,pay:edit.pay});}
+    if(!sv){closePanel();return;}
+    if(sv.kind==="term"){
+      sv.deposits=sv.deposits||[];
+      sv.deposits.push({id:uid(),amount:amt,date:iso,pay:edit.pay});
+      save();render();closePanel();
+      toast("Storting vast tot "+fullDate(addMonths(fromISO(iso),sv.termMonths||12)),null);
+      return;
+    }
+    const signed=(edit.dir<0?-amt:amt);
+    sv.movements=sv.movements||[];
+    sv.movements.push({id:uid(),amount:signed,date:iso,pay:edit.pay});
+    sv.amount=Math.round(((sv.amount||0)+signed)*100)/100;
     save();render();closePanel();
-    toast("Storting vast tot "+fullDate(addMonths(fromISO(iso),(sv&&sv.termMonths)||12)),null);
+    toast((signed<0?"Opname van ":"Inleg van ")+eur(Math.abs(signed))+" geboekt",null);
     return;
   }
   if(k==="cat"||k==="newcat"){
@@ -710,11 +849,13 @@ function savePanel(){
     const bal=(amt===null?0:amt);
     if(k==="newsav"){
       state.savings.push({id:uid(),label:label,goal:goal,kind:isTerm?"term":"free",
-        amount:isTerm?0:bal,termMonths:term,deposits:isTerm?[]:undefined});
+        amount:isTerm?0:bal,termMonths:term,
+        deposits:isTerm?[]:undefined,movements:isTerm?undefined:[]});
     }else{
       const it=state.savings.find(x=>x.id===edit.id);
       it.label=label;it.goal=goal;it.kind=isTerm?"term":"free";it.termMonths=term;
-      if(isTerm)it.deposits=it.deposits||[];else it.amount=bal;
+      if(isTerm)it.deposits=it.deposits||[];
+      else{it.amount=bal;it.movements=it.movements||[];}
     }
     save();render();closePanel();return;
   }
@@ -740,7 +881,7 @@ function savePanel(){
   if(k==="oneincome"||k==="oneexpense"){
     m.oneoff=m.oneoff.filter(x=>x.id!==edit.id);
     if(edit.family==="income")state.income.push({id:uid(),label:label,amount:amt,day:edit.day,kind:edit.ckind,shift:edit.shift});
-    else state.expenses.push({id:uid(),label:label,amount:amt,day:edit.day,pay:edit.pay});
+    else state.expenses.push({id:uid(),label:label,amount:amt,day:edit.day,pay:edit.pay,shift:edit.shift});
     save();render();closePanel();return;
   }
 
@@ -756,10 +897,10 @@ function savePanel(){
   }
   if(k==="expense"||k==="newexpense"){
     if(k==="newexpense"){
-      state.expenses.push({id:uid(),label:label,amount:amt,day:edit.day,pay:edit.pay});
+      state.expenses.push({id:uid(),label:label,amount:amt,day:edit.day,pay:edit.pay,shift:edit.shift});
     }else{
       const it=state.expenses.find(x=>x.id===edit.id);
-      it.label=label;it.amount=amt;it.day=edit.day;it.pay=edit.pay;
+      it.label=label;it.amount=amt;it.day=edit.day;it.pay=edit.pay;it.shift=edit.shift;
       applyExcSkip(m,edit.id);
     }
     save();render();closePanel();return;
@@ -797,8 +938,37 @@ $("segPD").onclick=()=>setPay("digital");
 $("segPC").onclick=()=>setPay("cash");
 $("segSN").onclick=()=>setShift(false);
 $("segSY").onclick=()=>setShift(true);
+$("segDI").onclick=()=>setDir(1);
+$("segDO").onclick=()=>setDir(-1);
 $("segKA").onclick=()=>setSkip(false);
 $("segKS").onclick=()=>setSkip(true);
+/* boekingen op een categorie, over alle maanden heen */
+function txOfCat(id){
+  let n=0;
+  Object.keys(state.months).forEach(mk=>{
+    n+=state.months[mk].tx.filter(t=>t.cat===id).length;
+  });
+  return n;
+}
+function moveTx(fromId,toId){
+  Object.keys(state.months).forEach(mk=>{
+    state.months[mk].tx.forEach(t=>{if(t.cat===fromId)t.cat=toId;});
+  });
+}
+function dropItem(k,id,extra){
+  if(k==="income")state.income=state.income.filter(x=>x.id!==id);
+  else if(k==="expense")state.expenses=state.expenses.filter(x=>x.id!==id);
+  else if(k==="cat")state.categories=state.categories.filter(x=>x.id!==id);
+  else if(k==="sav")state.savings=state.savings.filter(x=>x.id!==id);
+  else{const m=editM(view);m.oneoff=m.oneoff.filter(x=>x.id!==id);}
+  if(k==="income"||k==="expense"){
+    Object.keys(state.months).forEach(mk=>{
+      const mm=state.months[mk];
+      delete mm.paid[id];delete mm.recv[id];delete mm.exc[id];delete mm.skip[id];
+    });
+  }
+  if(extra)extra();
+}
 $("pDelete").onclick=()=>{
   const k=edit.kind, id=edit.id;
   let name="", note="";
@@ -810,29 +980,32 @@ $("pDelete").onclick=()=>{
   }else if(k==="oneincome"||k==="oneexpense"){
     const it=readM(view).oneoff.find(x=>x.id===id);
     name=it?it.label:"Post";
-  }else if(k==="cat"){
-    const it=state.categories.find(x=>x.id===id);
-    name=it?it.label:"Categorie";
-    const used=readM(view).tx.filter(t=>t.cat===id).length;
-    if(used)note=", "+used+" boeking"+(used>1?"en":"")+" blijft staan zonder categorie";
   }else if(k==="sav"){
     const it=state.savings.find(x=>x.id===id);
     name=it?it.label:"Spaardoel";
+  }else if(k==="cat"){
+    const it=state.categories.find(x=>x.id===id);
+    name=it?it.label:"Categorie";
+    const used=txOfCat(id);
+    const others=state.categories.filter(x=>x.id!==id);
+    closePanel();
+    if(!used){withUndo("“"+name+"” verwijderd",()=>dropItem(k,id));return;}
+    /* boekingen niet stilletjes ontkoppelen: laat kiezen waar ze heen gaan */
+    ask({
+      title:"“"+name+"” verwijderen",
+      body:used+" boeking"+(used>1?"en staan":" staat")+" op deze categorie. Kies waar "+(used>1?"ze":"hij")+" heen "+(used>1?"gaan":"gaat")+".",
+      okLabel:"Verwijderen",
+      danger:true,
+      choiceLabel:"Boekingen verplaatsen naar",
+      choices:others.map(c=>({value:c.id,label:c.label})).concat([{value:"",label:"Zonder categorie laten"}]),
+      onOk:target=>withUndo("“"+name+"” verwijderd",()=>dropItem(k,id,()=>{
+        if(target)moveTx(id,target);
+      }))
+    });
+    return;
   }
   closePanel();
-  withUndo("“"+name+"”"+(note||" verwijderd"),()=>{
-    if(k==="income")state.income=state.income.filter(x=>x.id!==id);
-    else if(k==="expense")state.expenses=state.expenses.filter(x=>x.id!==id);
-    else if(k==="cat")state.categories=state.categories.filter(x=>x.id!==id);
-    else if(k==="sav")state.savings=state.savings.filter(x=>x.id!==id);
-    else{const m=editM(view);m.oneoff=m.oneoff.filter(x=>x.id!==id);}
-    if(k==="income"||k==="expense"){
-      Object.keys(state.months).forEach(mk=>{
-        const mm=state.months[mk];
-        delete mm.paid[id];delete mm.recv[id];delete mm.exc[id];delete mm.skip[id];
-      });
-    }
-  });
+  withUndo("“"+name+"”"+(note||" verwijderd"),()=>dropItem(k,id));
 };
 $("pCancel").onclick=closePanel;
 $("pSave").onclick=savePanel;
@@ -857,10 +1030,14 @@ $("txAdd").onclick=()=>{
   if(!d||a===null||a<=0){toast("Vul een omschrijving en een bedrag in",null);return;}
   if(!state.categories.length){toast("Maak eerst een categorie aan",null);return;}
   const date=txDate||defaultDate();
-  editM(view).tx.push({id:uid(),label:d,amount:a,cat:$("txCat").value,date:date,pay:txPay});
+  /* een boeking hoort bij de maand van haar eigen datum, niet bij de maand
+     die je toevallig openhad */
+  const home=ymOfDate(fromISO(date));
+  editM(home).tx.push({id:uid(),label:d,amount:a,cat:$("txCat").value,date:date,pay:txPay});
   $("txDesc").value="";$("txAmt").value="";txDate=null;
   save();render();
   $("txDesc").focus();
+  if(home!==view)toast("“"+d+"” staat in "+ymLabel(home),()=>{view=home;render();},"Ga erheen");
 };
 
 /* Enter bevestigt, zodat je op een telefoon het toetsenbord niet hoeft
@@ -890,10 +1067,16 @@ document.body.addEventListener("click",e=>{
   if(dd){
     const svId=dd.dataset.deldep, depId=dd.dataset.id;
     const sv=state.savings.find(x=>x.id===svId);
-    const dp=sv&&(sv.deposits||[]).find(x=>x.id===depId);
-    withUndo("Storting van "+(dp?eur(dp.amount):"")+" verwijderd",()=>{
+    const fl=sv&&flowsOf(sv).find(x=>x.id===depId);
+    const what=(sv&&sv.kind==="term")?"Storting van ":"Boeking van ";
+    withUndo(what+(fl?eur(Math.abs(fl.amount)):"")+" verwijderd",()=>{
       const t=state.savings.find(x=>x.id===svId);
-      if(t)t.deposits=(t.deposits||[]).filter(x=>x.id!==depId);
+      if(!t)return;
+      if(t.kind==="term"){t.deposits=(t.deposits||[]).filter(x=>x.id!==depId);return;}
+      /* bij een vrije rekening draait het saldo mee terug */
+      const gone=(t.movements||[]).find(x=>x.id===depId);
+      t.movements=(t.movements||[]).filter(x=>x.id!==depId);
+      if(gone)t.amount=Math.round(((t.amount||0)-gone.amount)*100)/100;
     });
     return;
   }
@@ -910,36 +1093,94 @@ document.body.addEventListener("click",e=>{
 });
 
 /* ---------- gegevens ---------- */
+function replaceState(next,msg){
+  const snap=JSON.stringify(state);
+  state=next;save();render();
+  toast(msg,()=>{state=JSON.parse(snap);save();render();});
+}
 $("expBtn").onclick=()=>{
   const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
   const a=document.createElement("a");
   a.href=URL.createObjectURL(blob);
   a.download="budget-"+isoOf(NOW)+".json";
   a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  state.lastExport=isoOf(NOW);save();render();
 };
 $("impBtn").onclick=()=>$("impFile").click();
 $("impFile").onchange=e=>{
   const f=e.target.files[0];if(!f)return;
   const r=new FileReader();
   r.onload=()=>{
+    let d;
     try{
-      const d=JSON.parse(r.result);
+      d=JSON.parse(r.result);
       if(!d||!Array.isArray(d.income)||!Array.isArray(d.expenses))throw 0;
-      if(!confirm("Dit vervangt je huidige gegevens. Doorgaan?"))return;
-      const snap=JSON.stringify(state);
-      state=fix(d);save();render();
-      toast("Gegevens geïmporteerd",()=>{state=JSON.parse(snap);save();render();});
-    }catch(err){toast("Dit bestand is geen geldige budget-export",null);}
+    }catch(err){toast("Dit bestand is geen geldige budget-export",null);return;}
+    ask({
+      title:"Gegevens vervangen",
+      body:"Alles wat nu in deze browser staat wordt overschreven door "+f.name+". Je kunt dit met één tik ongedaan maken.",
+      okLabel:"Vervangen",
+      danger:true,
+      onOk:()=>replaceState(fix(d),"Gegevens geïmporteerd")
+    });
   };
   r.readAsText(f);
   e.target.value="";
 };
-$("wipeBtn").onclick=()=>{
-  if(!confirm("Alles wissen en opnieuw beginnen met de standaardgegevens?"))return;
-  const snap=JSON.stringify(state);
-  state=seed();save();view=TODAY_YM;render();
-  toast("Alles gewist",()=>{state=JSON.parse(snap);save();render();});
-};
+$("wipeBtn").onclick=()=>ask({
+  title:"Alles wissen",
+  body:"Je inkomsten, vaste lasten, boekingen en spaardoelen verdwijnen en de app begint opnieuw met de standaardcategorieën.",
+  okLabel:"Wissen",
+  danger:true,
+  onOk:()=>{view=TODAY_YM;replaceState(seed(),"Alles gewist");}
+});
+
+/* ---------- weergave ---------- */
+function applyTheme(){
+  const t=THEMES.includes(state.theme)?state.theme:"system";
+  const root=document.documentElement;
+  if(t==="system")root.removeAttribute("data-theme");else root.setAttribute("data-theme",t);
+  /* de statusbalk van de telefoon moet dezelfde kleur krijgen als de pagina */
+  $("themeColor").setAttribute("content",
+    getComputedStyle(root).getPropertyValue("--wine-900").trim()||"#2E0B14");
+}
+function setTheme(t){
+  state.theme=t;save();applyTheme();render();
+}
+$("thSystem").onclick=()=>setTheme("system");
+$("thLight").onclick=()=>setTheme("light");
+$("thDark").onclick=()=>setTheme("dark");
+/* wisselt het systeem van stand, dan verandert --wine-900 mee */
+if(window.matchMedia){
+  const mq=window.matchMedia("(prefers-color-scheme: dark)");
+  const onChange=()=>{if((state.theme||"system")==="system")applyTheme();};
+  if(mq.addEventListener)mq.addEventListener("change",onChange);
+  else if(mq.addListener)mq.addListener(onChange);
+}
+
+/* ---------- vegen tussen maanden ---------- */
+(function swipe(){
+  const SLOP=60, MAX_MS=700;
+  let x0=null,y0=null,t0=0;
+  const area=document.querySelector(".wrap");
+  area.addEventListener("touchstart",e=>{
+    x0=null;
+    if(dialogs.length||e.touches.length!==1)return;
+    /* niet kapen wat de gebruiker in een veld aan het doen is */
+    if(e.target.closest("input,select,textarea"))return;
+    x0=e.touches[0].clientX;y0=e.touches[0].clientY;t0=Date.now();
+  },{passive:true});
+  area.addEventListener("touchend",e=>{
+    if(x0===null)return;
+    const t=e.changedTouches[0], dx=t.clientX-x0, dy=t.clientY-y0;
+    x0=null;
+    if(Date.now()-t0>MAX_MS)return;
+    /* duidelijk horizontaal, anders is het gewoon scrollen */
+    if(Math.abs(dx)<SLOP||Math.abs(dx)<Math.abs(dy)*2)return;
+    view=ymShift(view,dx<0?1:-1);
+    render();
+  },{passive:true});
+})();
 
 /* ---------- maandwissel terwijl de app open staat ---------- */
 function refreshClock(){
@@ -954,7 +1195,11 @@ document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshClo
 window.addEventListener("focus",refreshClock);
 setInterval(refreshClock,60000);
 
+applyTheme();
 render();
+if(loadFailed){
+  toast("Je opgeslagen gegevens konden niet worden gelezen. Er is nog niets overschreven: exporteer eerst of sluit dit tabblad.",null);
+}
 
 /* ---------- installeren en offline ---------- */
 (function pwa(){

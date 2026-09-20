@@ -38,3 +38,10 @@
   for = "/icons/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
+
+# Schermafbeeldingen voor het installatievenster; vervangen betekent een
+# nieuwe naam of een nieuwe deploy, dus een korte cache volstaat.
+[[headers]]
+  for = "/screenshots/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
