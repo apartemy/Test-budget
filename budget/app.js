@@ -5,6 +5,7 @@ const MONTHS=["januari","februari","maart","april","mei","juni","juli","augustus
 const DOW=["ma","di","wo","do","vr","za","zo"];
 const KEY="budget_v8";
 
+const $=id=>document.getElementById(id);
 const pad=n=>String(n).padStart(2,"0");
 const ymKey=(y,m)=>y+"_"+pad(m+1);
 function ymParse(k){const p=k.split("_");return{y:+p[0],m:+p[1]-1};}
@@ -33,6 +34,10 @@ function parseAmt(v){
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 function dayLabel(d){return d.getDate()+" "+MONTHS[d.getMonth()].slice(0,3);}
+/* getal naar de komma-notatie die de invoervelden verwachten */
+const toInput=n=>(n===null||n===undefined||n==="")?"":String(n).replace(".",",");
+/* "€ 1.200,00  ·  € 40,00 contant", of alleen het totaal als er geen contant deel is */
+const withCash=(total,cash,suffix)=>cash>0?eur(total)+"  ·  "+eur(cash)+suffix:eur(total);
 
 /* ---------- startgegevens ---------- */
 function seed(){return{
@@ -69,6 +74,8 @@ function fix(d){
   Object.keys(d.months).forEach(k=>{
     const m=d.months[k];
     m.oneoff=m.oneoff||[];m.tx=m.tx||[];
+    /* vlaggenlijsten aanvullen: een geïmporteerd bestand mag ze missen */
+    m.paid=m.paid||{};m.recv=m.recv||{};m.exc=m.exc||{};m.skip=m.skip||{};
     m.oneoff.forEach(o=>{if(!o.pay)o.pay=o.ckind||"digital";});
     m.tx.forEach(t=>{if(!t.pay)t.pay="digital";});
     if(typeof m.start==="number")m.start={d:m.start,c:0};
@@ -124,12 +131,23 @@ function hasStart(k){
   const m=state.months[k];
   return !!(m&&m.start!==null&&m.start!==undefined);
 }
+/* vroegste maand waarvan iets is vastgelegd; de sleutels zijn
+   "jjjj_mm" met voorloopnul, dus gewoon vergelijken werkt */
+function firstMonth(){
+  const keys=Object.keys(state.months);
+  return keys.length?keys.reduce((a,b)=>a<b?a:b):null;
+}
 function startBalance(k,depth){
   depth=depth||0;
   if(hasStart(k)){const s=state.months[k].start;return{d:s.d||0,c:s.c||0};}
   if(depth>24)return{d:0,c:0};
   const prev=ymShift(k,-1);
-  if(!state.months[prev])return{d:0,c:0};
+  /* Vóór de eerste vastgelegde maand valt niets door te rekenen, dus daar
+     stopt de keten. Erná telt elke maand mee, ook een maand zonder eigen
+     gegevens: die draagt de vaste lasten en inkomsten gewoon door. Zonder
+     dat laatste stond elke maand verder dan één vooruit op nul. */
+  const first=firstMonth();
+  if(!first||prev<first)return{d:0,c:0};
   return endBalance(prev,depth+1);
 }
 function endBalance(k,depth){
@@ -180,7 +198,7 @@ function calc(k,depth){
     savMonth+=dp.amount;
     if(dp.pay==="cash")savC+=dp.amount;else savD+=dp.amount;
   }));
-  const start=(depth===undefined)?startBalance(k,0):startBalance(k,depth);
+  const start=startBalance(k,depth||0);
 
   const incExpected=incExpD+incExpC, incGot=incGotD+incGotC;
   const fixPlanned=fixPlanD+fixPlanC, fixPaid=fixPaidD+fixPaidC, varSpent=varD+varC;
@@ -204,34 +222,32 @@ function render(){
   const k=view, c=calc(k), m=readM(k);
   const p=ymParse(k);
 
-  document.getElementById("today").textContent=NOW.getDate()+" "+MONTHS[NOW.getMonth()];
-  document.getElementById("mname").innerHTML=MONTHS[p.m]+'<span class="yr num">'+p.y+"</span>";
-  document.getElementById("jumpNow").style.display=(k===TODAY_YM)?"none":"inline-block";
+  $("today").textContent=NOW.getDate()+" "+MONTHS[NOW.getMonth()];
+  $("mname").innerHTML=MONTHS[p.m]+'<span class="yr num">'+p.y+"</span>";
+  $("jumpNow").style.display=(k===TODAY_YM)?"none":"inline-block";
 
-  document.getElementById("heroLbl").textContent=(k===TODAY_YM)?"Beschikbaar nu":(k<TODAY_YM?"Eindsaldo van die maand":"Verwacht beschikbaar");
+  $("heroLbl").textContent=(k===TODAY_YM)?"Beschikbaar nu":(k<TODAY_YM?"Eindsaldo van die maand":"Verwacht beschikbaar");
   const live=(k===TODAY_YM);
   const heroVal=live?c.available:c.free;
-  document.getElementById("heroBig").innerHTML=eurBig(heroVal);
-  document.getElementById("heroBig").className="big num"+(heroVal<0?" neg":"");
+  $("heroBig").innerHTML=eurBig(heroVal);
+  $("heroBig").className="big num"+(heroVal<0?" neg":"");
   const dv=live?c.availD:c.freeD, cv=live?c.availC:c.freeC;
-  const sd=document.getElementById("sDig"), sc=document.getElementById("sCash");
-  sd.textContent=eur(dv);sd.className="v num"+(dv<0?" neg":"");
-  sc.textContent=eur(cv);sc.className="v num"+(cv<0?" neg":"");
-  const free=document.getElementById("sFree");
-  free.textContent=eur(c.free);free.className="v num"+(c.free<0?" neg":"");
+  setAmount($("sDig"),dv);
+  setAmount($("sCash"),cv);
+  setAmount($("sFree"),c.free);
 
   const fixPct=c.fixPlanned>0?Math.min(100,c.fixPaid/c.fixPlanned*100):0;
-  document.getElementById("mFix").style.width=fixPct+"%";
-  document.getElementById("mFixTxt").textContent=eur(c.fixPaid)+" van "+eur(c.fixPlanned);
+  $("mFix").style.width=fixPct+"%";
+  $("mFixTxt").textContent=eur(c.fixPaid)+" van "+eur(c.fixPlanned);
 
   const budgetTotal=state.categories.reduce((s,x)=>s+(x.budget||0),0);
-  const varWrap=document.getElementById("mVarWrap");
+  const varWrap=$("mVarWrap");
   if(budgetTotal>0){
     varWrap.style.display="";
     const vp=Math.min(100,c.varSpent/budgetTotal*100);
-    const el=document.getElementById("mVar");
+    const el=$("mVar");
     el.style.width=vp+"%";el.className="fill"+(c.varSpent>budgetTotal?" over":"");
-    document.getElementById("mVarTxt").textContent=eur(c.varSpent)+" van "+eur(budgetTotal);
+    $("mVarTxt").textContent=eur(c.varSpent)+" van "+eur(budgetTotal);
   }else{
     varWrap.style.display="none";
   }
@@ -247,15 +263,9 @@ function render(){
     h+='<div class="glabel"><span>Nog te komen</span><span class="num">'+eur(c.incoming)+"</span></div>";
     wait.forEach(x=>h+=incRow(x,false));
   }
-  const skippedInc=state.income.filter(i=>m.skip[i.id]);
-  if(skippedInc.length){
-    h+='<div class="glabel"><span>Overgeslagen deze maand</span><span></span></div>';
-    skippedInc.forEach(i=>h+='<div class="row tap" data-edit="income" data-id="'+i.id+'"><div class="rinfo"><div class="rname">'+esc(i.label)+' <span class="tag off">overgeslagen</span></div></div><div class="ramt soft num">'+eur(i.amount)+"</div></div>");
-  }
-  document.getElementById("incList").innerHTML=h||'<div class="empty">Nog geen inkomsten. Voeg je eerste bron toe.</div>';
-  document.getElementById("incTot").textContent=c.incExpC>0
-    ? eur(c.incExpected)+"  ·  "+eur(c.incExpC)+" contant"
-    : eur(c.incExpected);
+  h+=skippedRows(state.income.filter(i=>m.skip[i.id]),"income");
+  $("incList").innerHTML=h||'<div class="empty">Nog geen inkomsten. Voeg je eerste bron toe.</div>';
+  $("incTot").textContent=withCash(c.incExpected,c.incExpC," contant");
 
   /* vaste lasten */
   const recu=c.exp.filter(x=>x.rec), once=c.exp.filter(x=>!x.rec);
@@ -268,15 +278,9 @@ function render(){
     h+='<div class="glabel"><span>Alleen deze maand</span><span class="num">'+eur(once.reduce((s,x)=>s+x.amount,0))+"</span></div>";
     once.forEach(x=>h+=expRow(x));
   }
-  const skippedExp=state.expenses.filter(e=>m.skip[e.id]);
-  if(skippedExp.length){
-    h+='<div class="glabel"><span>Overgeslagen deze maand</span><span></span></div>';
-    skippedExp.forEach(e=>h+='<div class="row tap" data-edit="expense" data-id="'+e.id+'"><div class="rinfo"><div class="rname">'+esc(e.label)+' <span class="tag off">overgeslagen</span></div></div><div class="ramt soft num">'+eur(e.amount)+"</div></div>");
-  }
-  document.getElementById("expList").innerHTML=h||'<div class="empty">Nog geen vaste lasten. Voeg je eerste maandelijkse last toe.</div>';
-  document.getElementById("expTot").textContent=c.fixPlanC>0
-    ? eur(c.fixPlanned)+"  ·  "+eur(c.fixPlanC)+" contant"
-    : eur(c.fixPlanned);
+  h+=skippedRows(state.expenses.filter(e=>m.skip[e.id]),"expense");
+  $("expList").innerHTML=h||'<div class="empty">Nog geen vaste lasten. Voeg je eerste maandelijkse last toe.</div>';
+  $("expTot").textContent=withCash(c.fixPlanned,c.fixPlanC," contant");
 
   /* categorieën */
   const perCat={};
@@ -291,12 +295,10 @@ function render(){
       (cat.budget>0?'<div class="track"><div class="fill'+(spent>cat.budget?" over":"")+'" style="width:'+pct+'%"></div></div>':"")+
       "</div>";
   });
-  document.getElementById("catList").innerHTML=h;
-  document.getElementById("varTot").textContent=c.varC>0
-    ? eur(c.varSpent)+"  ·  "+eur(c.varC)+" contant"
-    : eur(c.varSpent);
+  $("catList").innerHTML=h;
+  $("varTot").textContent=withCash(c.varSpent,c.varC," contant");
 
-  const catSel=document.getElementById("txCat");
+  const catSel=$("txCat");
   const keep=catSel.value;
   catSel.innerHTML=state.categories.map(x=>'<option value="'+x.id+'">'+esc(x.label)+"</option>").join("");
   if(keep&&state.categories.some(x=>x.id===keep))catSel.value=keep;
@@ -312,7 +314,7 @@ function render(){
         '<div class="ramt num">'+eur(t.amount)+'</div><button class="x" data-del="tx" data-id="'+t.id+'" aria-label="Verwijder">×</button></div>';
     });
   }
-  document.getElementById("txList").innerHTML=h;
+  $("txList").innerHTML=h;
 
   /* sparen */
   h="";let savSum=0;
@@ -343,7 +345,7 @@ function render(){
           h+='<div class="dep"><div class="di">'+dayLabel(dd)+" "+dd.getFullYear()+
             (dp.pay==="cash"?' <span class="tag cash">contant</span>':"")+
             '<div class="dm">'+(done?"vrijgekomen op ":"vrij op ")+fullDate(mt)+"</div></div>"+
-            '<div class="da num'+(done?"":"")+'">'+eur(dp.amount)+"</div>"+
+            '<div class="da num">'+eur(dp.amount)+"</div>"+
             '<button class="x" data-deldep="'+sv.id+'" data-id="'+dp.id+'" aria-label="Verwijder storting">×</button></div>';
         });
         h+="</div>";
@@ -352,31 +354,47 @@ function render(){
     }
     h+="</div>";
   });
-  document.getElementById("savList").innerHTML=h||'<div class="empty">Nog geen spaardoel. Voeg er een toe, vrij opneembaar of met een vaste looptijd.</div>';
-  document.getElementById("savTot").textContent=c.savMonth>0
-    ? eur(savSum)+"  ·  "+eur(c.savMonth)+" deze maand"
-    : eur(savSum);
+  $("savList").innerHTML=h||'<div class="empty">Nog geen spaardoel. Voeg er een toe, vrij opneembaar of met een vaste looptijd.</div>';
+  $("savTot").textContent=withCash(savSum,c.savMonth," deze maand");
 
   /* instellingen */
-  document.getElementById("startMonthLbl").textContent=ymLabel(k);
-  document.getElementById("startBtn").textContent=eur(c.start.d)+" + "+eur(c.start.c)+" contant";
+  $("startMonthLbl").textContent=ymLabel(k);
+  $("startBtn").textContent=eur(c.start.d)+" + "+eur(c.start.c)+" contant";
   const explicit=hasStart(k);
-  document.getElementById("startPrompt").style.display=(!explicit&&c.start.d===0&&c.start.c===0)?"block":"none";
-  document.getElementById("startNote").textContent=explicit
+  $("startPrompt").style.display=(!explicit&&c.start.d===0&&c.start.c===0)?"block":"none";
+  $("startNote").textContent=explicit
     ? "Handmatig ingesteld. Dit is het bedrag waarmee de maand begint."
     : "Automatisch overgenomen uit de vorige maand. Tik om je werkelijke saldo in te vullen.";
 
-  document.getElementById("txDate").innerHTML=txDate?dayLabel(fromISO(txDate)):'<span class="ph">Datum</span>';
-  document.getElementById("txPay").textContent=txPay==="cash"?"Contant":"Rekening";
+  $("txDate").innerHTML=txDate?dayLabel(fromISO(txDate)):'<span class="ph">Datum</span>';
+  $("txPay").textContent=txPay==="cash"?"Contant":"Rekening";
+}
+
+/* bedrag plus de negatief-opmaak in één keer */
+function setAmount(el,n){
+  el.textContent=eur(n);
+  el.className="v num"+(n<0?" neg":"");
+}
+/* posten die deze maand zijn overgeslagen, identiek voor inkomsten en lasten */
+function skippedRows(items,editKind){
+  if(!items.length)return "";
+  return '<div class="glabel"><span>Overgeslagen deze maand</span><span></span></div>'+
+    items.map(it=>
+      '<div class="row tap" data-edit="'+editKind+'" data-id="'+it.id+'">'+
+      '<div class="rinfo"><div class="rname">'+esc(it.label)+
+      ' <span class="tag off">overgeslagen</span></div></div>'+
+      '<div class="ramt soft num">'+eur(it.amount)+"</div></div>"
+    ).join("");
 }
 
 function incRow(x,isGot){
   const tag=isGot?'<span class="tag in">binnen</span>':'<span class="tag wait">verwacht</span>';
   const excTag=x.exc?' <span class="tag exc">afwijkend</span>':"";
   const cash=x.kind==="cash"?' <span class="tag off">contant</span>':"";
-  const sub=x.date?(x.date?dayLabel(x.date):"")+(x.ref.shift?" · schuift bij weekend":""):"Geen vaste dag";
-  const check=x.manual?'<button class="check'+(x.got?" on":"")+'" data-toggle="recv" data-id="'+x.id+'" aria-label="Markeer als ontvangen">✓</button>':"";
-  return '<div class="row'+(isGot?"":"")+'">'+check+
+  const sub=x.date?dayLabel(x.date)+(x.ref.shift?" · schuift bij weekend":""):"Geen vaste dag";
+  const check=x.manual?'<button class="check'+(x.got?" on":"")+'" data-toggle="recv" data-id="'+x.id+
+    '" aria-pressed="'+(x.got?"true":"false")+'" aria-label="Markeer als ontvangen">✓</button>':"";
+  return '<div class="row">'+check+
     '<div class="rinfo tap" data-edit="'+(x.rec?"income":"oneincome")+'" data-id="'+x.id+'">'+
     '<div class="rname">'+esc(x.label)+" "+tag+excTag+cash+"</div>"+
     '<div class="rsub">'+sub+"</div></div>"+
@@ -387,7 +405,8 @@ function expRow(x){
   const cashTag=x.pay==="cash"?' <span class="tag cash">contant</span>':"";
   const sub=x.date?dayLabel(x.date):"Geen datum";
   return '<div class="row'+(x.paid?" done":"")+'">'+
-    '<button class="check'+(x.paid?" on":"")+'" data-toggle="paid" data-id="'+x.id+'" aria-label="Markeer als betaald">✓</button>'+
+    '<button class="check'+(x.paid?" on":"")+'" data-toggle="paid" data-id="'+x.id+
+    '" aria-pressed="'+(x.paid?"true":"false")+'" aria-label="Markeer als betaald">✓</button>'+
     '<div class="rinfo tap" data-edit="'+(x.rec?"expense":"oneexpense")+'" data-id="'+x.id+'">'+
     '<div class="rname">'+esc(x.label)+excTag+cashTag+'</div><div class="rsub">'+sub+'</div></div>'+
     '<div class="ramt num">'+eur(x.amount)+"</div></div>";
@@ -398,79 +417,66 @@ let calCtx=null, calMonth=null;
 function openCal(opts){
   calCtx=opts;
   calMonth=opts.value?ymOfDate(fromISO(opts.value)):(opts.month||view);
-  document.getElementById("calveil").classList.add("open");
+  $("calveil").classList.add("open");
   drawCal();
 }
 function drawCal(){
-  const wrap=document.getElementById("calveil");
-  const grid=document.getElementById("cGrid");
-  const dow=document.getElementById("cDow");
-  const title=document.getElementById("cTitle");
-  const navs=document.getElementById("cPrev").style;
-  if(calCtx.mode==="day"){
+  const grid=$("cGrid"), dow=$("cDow"), title=$("cTitle");
+  const monthNav=(calCtx.mode!=="day");
+  $("cPrev").style.visibility=monthNav?"visible":"hidden";
+  $("cNext").style.visibility=monthNav?"visible":"hidden";
+  let h="";
+  if(!monthNav){
     title.textContent="Dag van de maand";
-    document.getElementById("cPrev").style.visibility="hidden";
-    document.getElementById("cNext").style.visibility="hidden";
     dow.innerHTML="";
-    let h="";
     for(let d=1;d<=31;d++){
       h+='<button class="cell'+(String(calCtx.value)===String(d)?" sel":"")+'" data-day="'+d+'">'+d+"</button>";
     }
-    grid.innerHTML=h;
-    document.getElementById("cToday").textContent="Vandaag ("+NOW.getDate()+")";
+    $("cToday").textContent="Vandaag ("+NOW.getDate()+")";
   }else{
     const p=ymParse(calMonth);
     title.textContent=MONTHS[p.m]+" "+p.y;
-    document.getElementById("cPrev").style.visibility="visible";
-    document.getElementById("cNext").style.visibility="visible";
     dow.innerHTML=DOW.map(d=>"<span>"+d+"</span>").join("");
-    const first=new Date(p.y,p.m,1);
-    let lead=(first.getDay()+6)%7;
+    const lead=(new Date(p.y,p.m,1).getDay()+6)%7;
     const last=new Date(p.y,p.m+1,0).getDate();
     const prevLast=new Date(p.y,p.m,0).getDate();
-    let h="";
     for(let i=lead;i>0;i--)h+='<button class="cell mut" disabled>'+(prevLast-i+1)+"</button>";
     for(let d=1;d<=last;d++){
       const iso=p.y+"-"+pad(p.m+1)+"-"+pad(d);
-      const isNow=iso===isoOf(NOW);
-      h+='<button class="cell'+(isNow?" now":"")+(calCtx.value===iso?" sel":"")+'" data-iso="'+iso+'">'+d+"</button>";
+      h+='<button class="cell'+(iso===isoOf(NOW)?" now":"")+(calCtx.value===iso?" sel":"")+'" data-iso="'+iso+'">'+d+"</button>";
     }
-    grid.innerHTML=h;
-    document.getElementById("cToday").textContent="Vandaag";
+    $("cToday").textContent="Vandaag";
   }
-  document.getElementById("cClear").style.display=calCtx.clearable===false?"none":"";
+  grid.innerHTML=h;
+  $("cClear").style.display=calCtx.clearable===false?"none":"";
 }
-function closeCal(){document.getElementById("calveil").classList.remove("open");calCtx=null;}
-document.getElementById("cPrev").onclick=()=>{calMonth=ymShift(calMonth,-1);drawCal();};
-document.getElementById("cNext").onclick=()=>{calMonth=ymShift(calMonth,1);drawCal();};
-document.getElementById("cClear").onclick=()=>{const f=calCtx.onPick;closeCal();f(null);};
-document.getElementById("cToday").onclick=()=>{
-  const f=calCtx.onPick, mode=calCtx.mode;closeCal();
-  f(mode==="day"?NOW.getDate():isoOf(NOW));
-};
-document.getElementById("cGrid").addEventListener("click",e=>{
+function closeCal(){$("calveil").classList.remove("open");calCtx=null;}
+/* geeft de gekozen waarde door en sluit; calCtx is daarna leeg */
+function pickCal(val){const f=calCtx.onPick;closeCal();f(val);}
+$("cPrev").onclick=()=>{calMonth=ymShift(calMonth,-1);drawCal();};
+$("cNext").onclick=()=>{calMonth=ymShift(calMonth,1);drawCal();};
+$("cClear").onclick=()=>pickCal(null);
+$("cToday").onclick=()=>pickCal(calCtx.mode==="day"?NOW.getDate():isoOf(NOW));
+$("cGrid").addEventListener("click",e=>{
   const b=e.target.closest("button[data-iso],button[data-day]");
   if(!b)return;
-  const f=calCtx.onPick;
-  const val=b.dataset.iso?b.dataset.iso:parseInt(b.dataset.day,10);
-  closeCal();f(val);
+  pickCal(b.dataset.iso?b.dataset.iso:parseInt(b.dataset.day,10));
 });
-document.getElementById("calveil").addEventListener("click",e=>{if(e.target.id==="calveil")closeCal();});
+$("calveil").addEventListener("click",e=>{if(e.target.id==="calveil")closeCal();});
 
 /* ---------- toast met ongedaan maken ---------- */
-let toastTimer=null, undoSnap=null;
+let toastTimer=null;
 function toast(msg,undoFn,label){
-  const t=document.getElementById("toast");
-  document.getElementById("toastMsg").textContent=msg;
-  const btn=document.getElementById("toastAct");
+  $("toastMsg").textContent=msg;
+  const btn=$("toastAct");
   btn.textContent=label||"Ongedaan maken";
   btn.style.display=undoFn?"":"none";
-  btn.onclick=()=>{undoFn();hideToast();};
-  t.classList.add("show");
+  btn.onclick=undoFn?()=>{undoFn();hideToast();}:hideToast;
+  $("toast").classList.add("show");
   clearTimeout(toastTimer);
   toastTimer=setTimeout(hideToast,6000);
 }
-function hideToast(){document.getElementById("toast").classList.remove("show");}
+function hideToast(){$("toast").classList.remove("show");}
 function withUndo(msg,fn){
   const snap=JSON.stringify(state);
   fn();save();render();
@@ -479,7 +485,6 @@ function withUndo(msg,fn){
 
 /* ---------- bewerkscherm ---------- */
 let edit=null;
-const $=id=>document.getElementById(id);
 function show(id,on){$(id).classList.toggle("hidden",!on);}
 function clearErrors(){document.querySelectorAll(".field.bad").forEach(f=>f.classList.remove("bad"));}
 function fail(id){$(id).classList.add("bad");}
@@ -502,7 +507,7 @@ function openPanel(kind,id){
     show("fType",true);show("fLabel",true);show("fAmount",true);show("fKind",true);
     edit.rec=true;setSeg(true);
     if(it){
-      $("pLabel").value=it.label;$("pAmount").value=String(it.amount).replace(".",",");
+      $("pLabel").value=it.label;$("pAmount").value=toInput(it.amount);
       edit.day=it.day;edit.ckind=it.kind;edit.shift=!!it.shift;
       edit.exc=m.exc[it.id]||null;edit.skip=!!m.skip[it.id];
       show("fExc",true);show("fSkip",true);
@@ -516,7 +521,7 @@ function openPanel(kind,id){
     show("fType",true);show("fLabel",true);show("fAmount",true);show("fPay",true);
     edit.rec=true;setSeg(true);
     if(it){
-      $("pLabel").value=it.label;$("pAmount").value=String(it.amount).replace(".",",");
+      $("pLabel").value=it.label;$("pAmount").value=toInput(it.amount);
       edit.day=it.day;edit.exc=m.exc[it.id]||null;edit.skip=!!m.skip[it.id];edit.pay=it.pay||"digital";
       show("fExc",true);show("fSkip",true);
     }else{edit.day=1;}
@@ -532,10 +537,10 @@ function openPanel(kind,id){
     edit.rec=false;setSeg(false);
     if(isInc){show("fKind",true);}else{show("fPay",true);}
     if(it){
-      $("pLabel").value=it.label;$("pAmount").value=String(it.amount).replace(".",",");edit.date=it.date;
+      $("pLabel").value=it.label;$("pAmount").value=toInput(it.amount);edit.date=it.date;
       edit.pay=it.pay||"digital";edit.ckind=it.ckind||"digital";
     }else{
-      edit.date=(view===TODAY_YM)?isoOf(NOW):ymParse(view).y+"-"+pad(ymParse(view).m+1)+"-01";
+      edit.date=defaultDate();
     }
     setPay(edit.pay);setKind(edit.ckind);
   }
@@ -544,7 +549,7 @@ function openPanel(kind,id){
     $("pTitle").textContent=it?"Categorie":"Nieuwe categorie";
     $("lblLabel").textContent="Naam";$("lblAmount").textContent="Maandbudget, nul is geen budget";
     show("fLabel",true);show("fAmount",true);
-    if(it){$("pLabel").value=it.label;$("pAmount").value=it.budget?String(it.budget).replace(".",","):"";}
+    if(it){$("pLabel").value=it.label;$("pAmount").value=it.budget?toInput(it.budget):"";}
   }
   else if(kind==="sav"||kind==="newsav"){
     const it=kind==="sav"?state.savings.find(x=>x.id===id):null;
@@ -554,10 +559,10 @@ function openPanel(kind,id){
     edit.savKind=it?(it.kind||"free"):"free";
     edit.term=it?(it.termMonths||12):12;
     $("pTerm").value=String(edit.term);
-    if(it){$("pLabel").value=it.label;$("pAmount").value=String(it.amount||0).replace(".",",");$("pGoal").value=it.goal?String(it.goal).replace(".",","):"";}
+    if(it){$("pLabel").value=it.label;$("pAmount").value=toInput(it.amount||0);$("pGoal").value=it.goal?toInput(it.goal):"";}
     setSavKind(edit.savKind);
   }
-  else if(kind==="newdep"||kind==="dep"){
+  else if(kind==="newdep"){
     const sv=state.savings.find(x=>x.id===id);
     edit.savId=id;
     $("pTitle").textContent="Storting op "+(sv?sv.label:"spaarrekening");
@@ -572,35 +577,35 @@ function openPanel(kind,id){
     $("lblAmount").textContent="Saldo op je rekening";
     show("fAmount",true);show("fCash",true);
     const cur=hasStart(view)?state.months[view].start:null;
-    if(cur){$("pAmount").value=String(cur.d||0).replace(".",",");$("pCash").value=String(cur.c||0).replace(".",",");}
+    if(cur){$("pAmount").value=toInput(cur.d||0);$("pCash").value=toInput(cur.c||0);}
   }
   const removable=["income","expense","oneincome","oneexpense","cat","sav"].includes(kind);
   $("pDelete").style.display=removable?"block":"none";
   syncDateFields();
   $("veil").classList.add("open");
 }
-function setSeg(rec){
-  edit.rec=rec;
-  $("segR").classList.toggle("on",rec);$("segO").classList.toggle("on",!rec);
-  syncDateFields();
-}
 function defaultDate(){
   return (view===TODAY_YM)?isoOf(NOW):(ymParse(view).y+"-"+pad(ymParse(view).m+1)+"-01");
 }
+/* elk keuzeblok is één paar knoppen: links aan als de vlag uit staat */
+function setSegPair(leftId,rightId,right){
+  $(leftId).classList.toggle("on",!right);
+  $(rightId).classList.toggle("on",right);
+}
+function setSeg(rec){edit.rec=rec;setSegPair("segO","segR",rec);syncDateFields();}
+function setKind(k){edit.ckind=k;setSegPair("segD","segC",k==="cash");}
+function setPay(k){edit.pay=k;setSegPair("segPD","segPC",k==="cash");}
+function setShift(v){edit.shift=v;setSegPair("segSN","segSY",v);}
+function setSkip(v){edit.skip=v;setSegPair("segKA","segKS",v);}
 function setSavKind(k){
   edit.savKind=k;
-  $("segSF").classList.toggle("on",k!=="term");
-  $("segST").classList.toggle("on",k==="term");
+  setSegPair("segSF","segST",k==="term");
   show("fTerm",k==="term");
   show("fAmount",k!=="term");
   $("savKindHint").textContent=(k==="term")
     ? "Je voegt losse stortingen toe. Elke storting staat vanaf zijn eigen datum vast en krijgt een eigen vrijvaldatum."
     : "Je houdt één saldo bij dat je zelf aanpast.";
 }
-function setKind(k){edit.ckind=k;$("segD").classList.toggle("on",k==="digital");$("segC").classList.toggle("on",k==="cash");}
-function setPay(k){edit.pay=k;$("segPD").classList.toggle("on",k!=="cash");$("segPC").classList.toggle("on",k==="cash");}
-function setShift(v){edit.shift=v;$("segSN").classList.toggle("on",!v);$("segSY").classList.toggle("on",v);}
-function setSkip(v){edit.skip=v;$("segKA").classList.toggle("on",!v);$("segKS").classList.toggle("on",v);}
 function syncDateFields(){
   if(!edit)return;
   const k=edit.kind;
@@ -632,7 +637,7 @@ function savePanel(){
     editM(view).start={d:amt===null?0:amt,c:cash===null?0:cash};
     save();render();closePanel();toast("Beginsaldo bijgewerkt",null);return;
   }
-  const needsLabel=!["start","newdep","dep"].includes(k);
+  const needsLabel=!["start","newdep"].includes(k);
   if(needsLabel&&!label){fail("fLabel");return;}
 
   if(k==="newdep"){
@@ -690,7 +695,6 @@ function savePanel(){
     else state.expenses.push({id:uid(),label:label,amount:amt,day:edit.day,pay:edit.pay});
     save();render();closePanel();return;
   }
-
 
   if(k==="income"||k==="newincome"){
     if(k==="newincome"){
@@ -804,7 +808,7 @@ $("txAdd").onclick=()=>{
   const a=parseAmt($("txAmt").value);
   if(!d||a===null||a<=0){toast("Vul een omschrijving en een bedrag in",null);return;}
   if(!state.categories.length){toast("Maak eerst een categorie aan",null);return;}
-  const date=txDate||((view===TODAY_YM)?isoOf(NOW):ymParse(view).y+"-"+pad(ymParse(view).m+1)+"-01");
+  const date=txDate||defaultDate();
   editM(view).tx.push({id:uid(),label:d,amount:a,cat:$("txCat").value,date:date,pay:txPay});
   $("txDesc").value="";$("txAmt").value="";txDate=null;
   save();render();
@@ -895,9 +899,7 @@ render();
 
 /* ---------- installeren en offline ---------- */
 (function pwa(){
-  const row=document.getElementById("installRow");
-  const btn=document.getElementById("installBtn");
-  const note=document.getElementById("installNote");
+  const row=$("installRow"), btn=$("installBtn"), note=$("installNote");
   const mq=window.matchMedia?window.matchMedia("(display-mode: standalone)"):null;
   const standalone=(mq&&mq.matches)||window.navigator.standalone===true;
   const ios=/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;
