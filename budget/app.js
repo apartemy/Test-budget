@@ -606,7 +606,11 @@ $("cGrid").addEventListener("click",e=>{
 $("calveil").addEventListener("click",e=>{if(e.target.id==="calveil")closeCal();});
 
 /* ---------- toast met ongedaan maken ---------- */
-let toastTimer=null;
+const TOAST_MS=4000;
+/* De tik die de melding oproept bubbelt daarna nog door naar document.
+   Binnen deze marge sluit een handeling hem dus niet meteen weer. */
+const TOAST_GRACE=500;
+let toastTimer=null, toastShownAt=0;
 function toast(msg,undoFn,label){
   $("toastMsg").textContent=msg;
   const btn=$("toastAct");
@@ -614,10 +618,23 @@ function toast(msg,undoFn,label){
   btn.style.display=undoFn?"":"none";
   btn.onclick=undoFn?()=>{undoFn();hideToast();}:hideToast;
   $("toast").classList.add("show");
+  toastShownAt=Date.now();
   clearTimeout(toastTimer);
-  toastTimer=setTimeout(hideToast,6000);
+  toastTimer=setTimeout(hideToast,TOAST_MS);
 }
-function hideToast(){$("toast").classList.remove("show");}
+function hideToast(){clearTimeout(toastTimer);$("toast").classList.remove("show");}
+/* Ben je alweer met iets anders bezig, dan hoeft de melding er niet meer te
+   staan. Bewust niet op scrollen: na het boeken van een uitgave springt de
+   focus terug naar het omschrijvingsveld, en het toetsenbord dat dan opengaat
+   verschuift de pagina. */
+function dismissOnNextAction(e){
+  if(!$("toast").classList.contains("show"))return;
+  if(Date.now()-toastShownAt<TOAST_GRACE)return;
+  if(e.target&&e.target.closest&&e.target.closest("#toast"))return;
+  hideToast();
+}
+document.addEventListener("pointerdown",dismissOnNextAction,true);
+document.addEventListener("keydown",dismissOnNextAction,true);
 function withUndo(msg,fn){
   const snap=JSON.stringify(state);
   fn();save();render();

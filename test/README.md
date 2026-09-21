@@ -8,6 +8,7 @@ volgende wijzigingen opnieuw te kunnen aantonen.
 | --- | --- |
 | `mechanics.test.js` | Elke functie van de app: inkomsten en lasten, maandelijks en eenmalig, afvinken, overslaan, afwijkende datum, categorieën met en zonder budget, boekingen op rekening en contant, spaardoelen vrij en met vaste termijn, stortingen, verwijderen met ongedaan maken, beginsaldo, de doorrekening over maanden heen, en of alles een herlaadbeurt overleeft. |
 | `features.test.js` | Boekingen die bij hun eigen maand horen en de eenmalige verhuizing van oude gegevens, de weekendregel voor vaste lasten, de weergavekeuze, de exportherinnering, de eigen bevestigingsvensters in plaats van `confirm()`, en vegen tussen maanden. |
+| `toast.test.js` | De melding met "Ongedaan maken": waar hij staat, dat hij geen knop eronder afvangt, dat hij na vier seconden of bij de volgende handeling verdwijnt, en dat de melding over een andere maand het openende toetsenbord overleeft. |
 | `keyboard.test.js` | Focus, Escape, Tab binnen het venster, achtergrondvergrendeling en Enter als bevestiging. |
 | `offline.test.js` | Of de service worker zich registreert, of de app-shell inclusief `app.css` en `app.js` in de cache staat, of caches van oudere versies zijn opgeruimd, en of de app zonder internet nog opstart. De verwachte cachenaam leest hij uit `sw.js`, dus een versieverhoging breekt deze test niet. |
 

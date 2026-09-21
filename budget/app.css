@@ -292,12 +292,24 @@ details.settings[open] summary::after{content:"–";}
 .calfoot button.accent{color:var(--wine);}
 
 .toast{
-  position:fixed;left:50%;transform:translateX(-50%) translateY(140%);
-  bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:1100;
+  position:fixed;
+  /* Beide zijden vastzetten in plaats van left:50% met een verschuiving:
+     anders krijgt de melding maar de halve schermbreedte toegemeten en
+     breekt de tekst in een smalle kolom af. fixed rekent vanaf de viewport
+     en niet vanaf de padding op :root, dus de veilige zones tellen hier
+     opnieuw mee. */
+  left:calc(16px + env(safe-area-inset-left,0px));
+  right:calc(16px + env(safe-area-inset-right,0px));
+  top:calc(12px + env(safe-area-inset-top,0px));
+  margin:0 auto;max-width:560px;z-index:1100;
+  transform:translateY(-160%);
   background:var(--cream);color:var(--ink);border-radius:10px;
   padding:12px 14px;display:flex;align-items:center;gap:14px;
-  font-size:13.5px;max-width:min(560px,calc(100vw - 32px));
+  font-size:13.5px;
   transition:transform .25s ease;box-shadow:0 10px 34px rgba(0,0,0,.45);
+  /* een melding mag nooit een knop eronder afvangen */
+  pointer-events:none;
 }
-.toast.show{transform:translateX(-50%) translateY(0);}
-.toast button{background:none;border:none;color:var(--wine);font-weight:700;font-size:13.5px;cursor:pointer;white-space:nowrap;}
+.toast.show{transform:translateY(0);}
+.toast span{flex:1;}
+.toast button{background:none;border:none;color:var(--wine);font-weight:700;font-size:13.5px;cursor:pointer;white-space:nowrap;pointer-events:auto;}
