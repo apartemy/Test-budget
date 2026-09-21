@@ -49,27 +49,28 @@ button{font-family:inherit;}
 @media (prefers-reduced-motion:reduce){*{animation-duration:0.01ms!important;transition-duration:0.01ms!important;}}
 .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;}
 
-.masthead{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:18px;}
-.masthead h1{font-family:var(--serif);font-size:26px;font-weight:500;margin:0;letter-spacing:-0.01em;color:var(--on-dark);}
-.masthead .today{font-size:12px;color:var(--on-dark-soft);}
-
-.monthbar{
-  display:flex;align-items:center;justify-content:space-between;
-  border-top:1px solid var(--line-dark);border-bottom:1px solid rgba(246,237,230,.09);
-  padding:8px 0;margin-bottom:18px;
+.masthead{
+  display:flex;align-items:center;gap:12px;
+  border-bottom:1px solid rgba(246,237,230,.09);
+  padding-bottom:10px;margin-bottom:18px;
 }
-.monthbar .mtitle{display:flex;align-items:center;gap:10px;}
-.monthbar .mname{font-family:var(--serif);font-size:17px;font-weight:500;color:var(--on-dark);}
-.monthbar .mname .yr{color:var(--on-dark-soft);font-size:14px;margin-left:6px;}
+.masthead h1{font-family:var(--serif);font-size:26px;font-weight:500;margin:0;letter-spacing:-0.01em;color:var(--on-dark);}
+.masthead .mname .yr{color:var(--on-dark-soft);font-size:17px;margin-left:7px;}
+.masthead .today{font-size:12px;color:var(--on-dark-soft);margin-left:auto;white-space:nowrap;}
+.burger{
+  width:38px;height:38px;min-width:38px;margin-left:-8px;
+  border:none;background:transparent;color:var(--on-dark);
+  font-size:20px;line-height:1;cursor:pointer;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;position:relative;
+}
+.burger:active{background:rgba(246,237,230,.12);}
+/* het stipje van de exportherinnering, zichtbaar zonder het menu te openen */
+.burger .nudge{position:absolute;top:5px;right:4px;margin:0;}
 .navbtn{
   width:36px;height:36px;border:none;background:transparent;color:var(--on-dark);
   font-size:17px;cursor:pointer;border-radius:50%;display:flex;align-items:center;justify-content:center;
 }
 .navbtn:active{background:rgba(246,237,230,.12);}
-.todaybtn{
-  border:1px solid var(--line-dark);background:transparent;color:var(--on-dark);
-  font-size:11px;padding:4px 9px;border-radius:99px;cursor:pointer;
-}
 
 .ledger{
   background:var(--cream);color:var(--ink);border-radius:var(--r);
@@ -192,15 +193,24 @@ section{margin-bottom:28px;}
 .depadd{width:100%;margin-top:9px;padding:8px;border:1px dashed var(--line-strong);border-radius:8px;background:transparent;color:var(--wine);font-size:12.5px;font-weight:600;cursor:pointer;}
 .depadd:active{background:var(--cream-2);}
 
-details.settings{border-top:1px solid var(--line-dark);padding-top:14px;color:var(--on-dark);}
-details.settings summary{
-  font-family:var(--serif);font-size:16px;cursor:pointer;list-style:none;
-  display:flex;justify-content:space-between;align-items:center;
+/* De lade blijft donker, zodat .setrow, .setnote, .ghost en .seg precies
+   dezelfde kleuren houden als toen dit blok nog onder de pagina stond. */
+.drawer{
+  background:var(--wine-800);color:var(--on-dark);
+  width:min(320px,86vw);height:100%;overflow-y:auto;
+  border-right:1px solid var(--line-dark);
+  padding:20px 18px 22px;
+  padding-top:calc(20px + env(safe-area-inset-top,0px));
+  padding-left:calc(18px + env(safe-area-inset-left,0px));
+  padding-bottom:calc(22px + env(safe-area-inset-bottom,0px));
+  animation:slidein .24s ease-out;
 }
-details.settings summary::-webkit-details-marker{display:none;}
-details.settings summary::after{content:"+";color:var(--on-dark-soft);font-size:18px;}
-details.settings[open] summary::after{content:"–";}
-.setgrid{margin-top:14px;display:flex;flex-direction:column;gap:11px;}
+@keyframes slidein{from{transform:translateX(-100%);}to{transform:translateX(0);}}
+.drawerhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
+.drawerhead h2{font-family:var(--serif);font-size:20px;font-weight:500;margin:0;color:var(--on-dark);}
+.drawerhead .x{color:var(--on-dark-soft);}
+.drawerhead .x:active{background:rgba(246,237,230,.12);color:var(--on-dark);}
+.setgrid{display:flex;flex-direction:column;gap:11px;}
 .setrow{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:14px;}
 .ghost{
   padding:9px 13px;border:1px solid var(--line-dark);border-radius:8px;
@@ -214,6 +224,9 @@ details.settings[open] summary::after{content:"–";}
 .setrow .pair{display:flex;gap:8px;}
 .setrow .seg{flex:0 1 300px;}
 .setrow .seg button{padding:7px 4px;font-size:12px;}
+/* in de smalle lade mag een rij afbreken in plaats van te verdringen */
+.drawer .setrow{flex-wrap:wrap;}
+.drawer .setrow .seg{flex:1 1 100%;}
 /* stipje op de instellingenkop zolang er iets te doen is, zonder te zeuren */
 .nudge{
   display:inline-block;width:7px;height:7px;border-radius:50%;
@@ -225,6 +238,8 @@ details.settings[open] summary::after{content:"–";}
   align-items:flex-end;justify-content:center;
 }
 .veil.open{display:flex;}
+/* zelfde sluier, maar het venster schuift van links in en vult de hoogte */
+.veil.side{align-items:stretch;justify-content:flex-start;}
 .panel{
   background:var(--cream);color:var(--ink);width:100%;max-width:640px;
   border-radius:16px 16px 0 0;padding:22px 18px;

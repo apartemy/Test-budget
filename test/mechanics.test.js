@@ -154,7 +154,7 @@ function check(name, cond, extra) {
   check('exc: afwijkend tag', (await page.textContent('#incList')).includes('afwijkend'));
 
   // ---- start balance
-  await page.click('details.settings summary');
+  await page.click('#menuBtn');
   await page.click('#startBtn');
   await page.fill('#pAmount', '1000');
   await page.fill('#pCash', '50');
@@ -163,26 +163,29 @@ function check(name, cond, extra) {
   check('start: note says handmatig', (await page.textContent('#startNote')).includes('Handmatig'));
 
   // ---- forward months carry the chain (the startBalance fix)
-  const monthValue = async () => (await page.textContent('#startBtn'));
-  await page.click('#nextM');
-  const m1 = await monthValue();
-  await page.click('#nextM');
-  const m2 = await monthValue();
-  await page.click('#nextM');
-  const m3 = await monthValue();
-  check('chain: month +1 is not zero', !/^€0,00 \+ €0,00/.test(m1), m1);
-  check('chain: month +2 is not zero', !/^€0,00 \+ €0,00/.test(m2), m2);
-  check('chain: month +3 is not zero', !/^€0,00 \+ €0,00/.test(m3), m3);
-  check('chain: months differ (projection moves)', m1 !== m2 && m2 !== m3, [m1, m2, m3]);
-  console.log('  info  forward chain:', JSON.stringify([m1, m2, m3]));
-  await page.click('#jumpNow');
+  // De maandknoppen zijn weg; de doorrekening zelf blijft wél belangrijk,
+  // want de vooruitblikpagina leunt erop. calc() is een function-declaratie
+  // op het hoogste niveau van een klassiek script en dus bereikbaar op window.
+  await page.click('#menuClose');
+  const chain = await page.evaluate(() => {
+    const p = x => String(x).padStart(2, '0');
+    const key = n => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + n);
+      return d.getFullYear() + '_' + p(d.getMonth() + 1); };
+    const at = n => { const c = calc(key(n)); return { d: c.start.d, c: c.start.c }; };
+    return { now: at(0), m1: at(1), m2: at(2), m3: at(3), back1: at(-1), back2: at(-2) };
+  });
+  const zero = s => s.d === 0 && s.c === 0;
+  check('chain: month +1 is not zero', !zero(chain.m1), chain);
+  check('chain: month +2 is not zero', !zero(chain.m2), chain);
+  check('chain: month +3 is not zero', !zero(chain.m3), chain);
+  check('chain: months differ (projection moves)',
+    chain.m1.d !== chain.m2.d && chain.m2.d !== chain.m3.d, chain);
+  console.log('  info  forward chain:', JSON.stringify([chain.m1, chain.m2, chain.m3]));
 
   // ---- no back-projection before the first recorded month
-  await page.click('#prevM');
-  await page.click('#prevM');
-  const past = await monthValue();
-  check('chain: months before the first record stay zero', /^€0,00 \+ €0,00/.test(past), past);
-  await page.click('#jumpNow');
+  check('chain: months before the first record stay zero', zero(chain.back1) && zero(chain.back2), chain);
+  check('chain: the current month keeps the balance that was entered',
+    chain.now.d === 1000 && chain.now.c === 50, chain);
 
   // ---- convert a recurring item to one-off and back
   await page.click('#incList .rinfo.tap >> nth=0');

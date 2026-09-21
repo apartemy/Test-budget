@@ -104,8 +104,6 @@ const check = (n, c, x) => (c ? ok : fails).push(n + (c ? '' : '  <<< ' + JSON.s
   check('undo: melding verdwijnt erna', !(await shown()));
   await page.click('#txList .x');
   await page.waitForTimeout(TOAST_GRACE_WAIT());
-  await page.click('#prevM');
-  await page.click('#jumpNow');
 
   // ---- verdwijnt vanzelf na vier seconden
   await raiseToast();
@@ -114,23 +112,16 @@ const check = (n, c, x) => (c ? ok : fails).push(n + (c ? '' : '  <<< ' + JSON.s
   await page.waitForTimeout(1600);
   check('toast: na 4,5 seconden weg', !(await shown()));
 
-  // ---- de melding over een andere maand overleeft het toetsenbord
-  // (na het boeken springt de focus terug naar #txDesc; dat mag hem niet sluiten)
-  const nextIso = await page.evaluate(() => {
-    const n = new Date(), nx = new Date(n.getFullYear(), n.getMonth() + 1, 15), p = x => String(x).padStart(2, '0');
-    return nx.getFullYear() + '-' + p(nx.getMonth() + 1) + '-15';
-  });
-  await page.fill('#txDesc', 'Volgende maand');
-  await page.fill('#txAmt', '25');
-  await page.click('#txDate');
-  await page.click('#cNext');
-  await page.click('.cal button[data-iso="' + nextIso + '"]');
-  await page.click('#txAdd');
-  check('toast: de melding over een andere maand blijft staan', await shown());
-  check('toast: met de knop om erheen te gaan', (await page.textContent('#toastAct')) === 'Ga erheen',
-    await page.textContent('#toastAct'));
-  check('toast: de focus staat weer in het omschrijvingsveld',
-    (await page.evaluate(() => document.activeElement.id)) === 'txDesc');
+  // ---- scrollen en het toetsenbord sluiten de melding niet
+  // Op een telefoon verschuift de pagina zodra een veld de focus krijgt; dat
+  // mag geen melding wegvagen die de gebruiker nog moet kunnen lezen.
+  await raiseToast();
+  await page.waitForTimeout(TOAST_GRACE_WAIT());
+  await page.evaluate(() => { window.scrollBy(0, 200); document.getElementById('txDesc').focus(); });
+  check('toast: scrollen sluit hem niet', await shown());
+  check('toast: focus in een veld sluit hem niet',
+    (await page.evaluate(() => document.activeElement.id)) === 'txDesc' && (await shown()));
+  await page.evaluate(() => window.scrollTo(0, 0));
 
   check('geen fouten in de console', errors.length === 0, errors);
 

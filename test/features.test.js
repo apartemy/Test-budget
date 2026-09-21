@@ -41,19 +41,24 @@ const MONTHS = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli',
       nextKey: nx.getFullYear() + '_' + p(nx.getMonth() + 1)
     };
   });
-  await page.fill('#txDesc', 'Volgende maand');
-  await page.fill('#txAmt', '25');
+  // De kiezer laat de lopende maand niet meer los, dus er kan niets meer
+  // buiten beeld terechtkomen.
   await page.click('#txDate');
-  await page.click('#cNext');
-  await page.click('.cal button[data-iso="' + nextMonth + '"]');
+  check('datumkiezer: geen maandpijlen bij het boeken',
+    (await page.locator('#cPrev').evaluate(el => getComputedStyle(el).visibility)) === 'hidden');
+  check('datumkiezer: de kalender staat op de huidige maand',
+    (await page.textContent('#cTitle')).includes(MONTHS[new Date().getMonth()]), await page.textContent('#cTitle'));
+  check('datumkiezer: geen enkele dag uit een andere maand te kiezen',
+    (await page.locator('.cal button[data-iso]').evaluateAll(
+      (els, m) => els.every(e => e.dataset.iso.slice(0, 7) === m), thisMonth.replace('_', '-'))));
+  await page.click('.cal button[data-iso$="-15"]');
+  await page.fill('#txDesc', 'Deze maand');
+  await page.fill('#txAmt', '25');
   await page.click('#txAdd');
   const s1 = await stored();
-  check('tx date: stored under its own month', !!(s1.months[nextKey] || {}).tx?.length, Object.keys(s1.months));
-  check('tx date: not in the month on screen', !(s1.months[thisMonth] || { tx: [] }).tx.length, s1.months[thisMonth]);
-  check('tx date: the app says where it went', (await page.textContent('#toastMsg')).includes('staat in'), await page.textContent('#toastMsg'));
-  await page.click('#toastAct');
-  check('tx date: the toast jumps to that month', (await monthLabel()).includes(MONTHS[+nextKey.slice(5) - 1]), await monthLabel());
-  check('tx date: the booking is visible there', (await page.textContent('#txList')).includes('Volgende maand'));
+  check('tx date: geboekt in de maand op het scherm', !!(s1.months[thisMonth] || {}).tx?.length, Object.keys(s1.months));
+  check('tx date: niets in een andere maand beland', !(s1.months[nextKey] || { tx: [] }).tx.length, s1.months[nextKey]);
+  check('tx date: de boeking is gewoon zichtbaar', (await page.textContent('#txList')).includes('Deze maand'));
 
   // ---- old data that was filed under the wrong month gets moved on load
   const stray = {
@@ -94,7 +99,7 @@ const MONTHS = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli',
   check('weekend: the shown date is a weekday', weekday !== 0 && weekday !== 6, weekday);
 
   // ---- display setting
-  await page.click('details.settings summary');
+  await page.click('#menuBtn');
   check('theme: system is the default', (await page.getAttribute('#thSystem', 'class')).includes('on'));
   await page.click('#thDark');
   check('theme: attribute set', (await page.getAttribute('html', 'data-theme')) === 'dark');
@@ -108,7 +113,7 @@ const MONTHS = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli',
   await page.reload();
   await page.waitForFunction(() => document.getElementById('mname').textContent.length > 0);
   check('theme: survives a reload', (await page.getAttribute('html', 'data-theme')) === 'light');
-  await page.click('details.settings summary');
+  await page.click('#menuBtn');
   await page.click('#thSystem');
   check('theme: system clears the attribute', (await page.getAttribute('html', 'data-theme')) === null);
 
@@ -122,7 +127,7 @@ const MONTHS = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli',
   });
   await page.reload();
   await page.waitForFunction(() => document.getElementById('mname').textContent.length > 0);
-  await page.click('details.settings summary');
+  await page.click('#menuBtn');
   check('export: nudge gone after exporting', !(await page.isVisible('#setNudge')));
   check('export: note shows the date', (await page.textContent('#exportNote')).includes('Laatst geëxporteerd'));
   await page.evaluate(() => {
@@ -133,7 +138,7 @@ const MONTHS = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli',
   });
   await page.reload();
   await page.waitForFunction(() => document.getElementById('mname').textContent.length > 0);
-  await page.click('details.settings summary');
+  await page.click('#menuBtn');
   check('export: nudge returns when it goes stale', await page.isVisible('#setNudge'));
 
   // ---- wipe asks in the app, not through the browser
@@ -152,32 +157,6 @@ const MONTHS = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli',
   check('wipe: confirming clears the data', (await page.textContent('#expList')).includes('Nog geen vaste lasten'));
   await page.click('#toastAct');
   check('wipe: undo brings it back', (await page.textContent('#expList')).includes('Hypotheek'));
-
-  // ---- swiping between months
-  await boot();
-  const start = await monthLabel();
-  // Playwright kent geen veeggebaar, dus stuur de twee aanrakingen zelf.
-  const swipe = async ([x0, x1, y1 = 300]) => {
-    await page.evaluate(([x0, x1, y1]) => {
-      const el = document.querySelector('.wrap');
-      const at = (x, y) => [new Touch({ identifier: 1, target: el, clientX: x, clientY: y })];
-      el.dispatchEvent(new TouchEvent('touchstart', { touches: at(x0, 300), changedTouches: at(x0, 300), bubbles: true }));
-      el.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: at(x1, y1), bubbles: true }));
-    }, [x0, x1, y1]);
-  };
-  await swipe([330, 90]);
-  const after = await monthLabel();
-  check('swipe: left moves a month forward', after !== start, [start, after]);
-  await swipe([90, 330]);
-  check('swipe: right moves back', (await monthLabel()) === start, [start, await monthLabel()]);
-  await swipe([210, 250]);
-  check('swipe: a short drag does nothing', (await monthLabel()) === start);
-  await swipe([330, 90, 700]);
-  check('swipe: a mostly vertical move does nothing', (await monthLabel()) === start);
-  await page.click('#addCat');
-  await swipe([330, 90]);
-  check('swipe: ignored while a dialog is open', (await monthLabel()) === start);
-  await page.keyboard.press('Escape');
 
   check('no page errors', errors.length === 0, errors);
 

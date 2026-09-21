@@ -21,6 +21,9 @@ function startOfDay(d){const x=new Date(d);x.setHours(0,0,0,0);return x;}
 
 let NOW=startOfDay(new Date());
 let TODAY_YM=ymOfDate(NOW);
+/* De app toont alleen de lopende maand. `view` blijft bestaan omdat de hele
+   berekening er per maand op leunt, maar volgt voortaan alleen de klok; een
+   aparte pagina om vooruit te blikken en terug te kijken komt later. */
 let view=TODAY_YM;
 
 function eur(n){return (n<0?"−":"")+"€"+Math.abs(n).toLocaleString("nl-NL",{minimumFractionDigits:2,maximumFractionDigits:2});}
@@ -272,7 +275,6 @@ function render(){
 
   $("today").textContent=NOW.getDate()+" "+MONTHS[NOW.getMonth()];
   $("mname").innerHTML=MONTHS[p.m]+'<span class="yr num">'+p.y+"</span>";
-  $("jumpNow").style.display=(k===TODAY_YM)?"none":"inline-block";
 
   $("heroLbl").textContent=(k===TODAY_YM)?"Beschikbaar nu":(k<TODAY_YM?"Eindsaldo van die maand":"Verwacht beschikbaar");
   const live=(k===TODAY_YM);
@@ -563,11 +565,14 @@ function openCal(opts){
 }
 function drawCal(){
   const grid=$("cGrid"), dow=$("cDow"), title=$("cTitle");
-  const monthNav=(calCtx.mode!=="day");
-  $("cPrev").style.visibility=monthNav?"visible":"hidden";
-  $("cNext").style.visibility=monthNav?"visible":"hidden";
+  const dayMode=(calCtx.mode==="day");
+  /* welk raster we tekenen staat los van of je van maand mag wisselen:
+     met lockMonth blijf je in de maand die op het scherm staat */
+  const showNav=!dayMode&&!calCtx.lockMonth;
+  $("cPrev").style.visibility=showNav?"visible":"hidden";
+  $("cNext").style.visibility=showNav?"visible":"hidden";
   let h="";
-  if(!monthNav){
+  if(dayMode){
     title.textContent="Dag van de maand";
     dow.innerHTML="";
     for(let d=1;d<=31;d++){
@@ -937,13 +942,15 @@ function convertToOneoff(fam,id,label,amt,date){
 }
 
 /* ---------- knoppen ---------- */
-$("prevM").onclick=()=>{view=ymShift(view,-1);render();};
-$("nextM").onclick=()=>{view=ymShift(view,1);render();};
-$("jumpNow").onclick=()=>{view=TODAY_YM;render();};
-
 $("pDay").onclick=()=>openCal({mode:"day",value:edit.day,onPick:v=>{edit.day=v;syncDateFields();}});
-$("pDate").onclick=()=>openCal({mode:"date",value:edit.date,month:view,onPick:v=>{edit.date=v;syncDateFields();}});
-$("pExc").onclick=()=>openCal({mode:"date",value:edit.exc,month:view,onPick:v=>{edit.exc=v;syncDateFields();}});
+/* Een eenmalige post hoort bij de maand waarin je hem invoert, dus daar blijft
+   de kiezer in. Een storting op een spaarrekening mag wel een andere maand
+   krijgen: die staat altijd op de spaarkaart zelf en raakt dus niet uit beeld,
+   en een storting van vorige week alsnog vastleggen moet gewoon kunnen. */
+$("pDate").onclick=()=>openCal({mode:"date",value:edit.date,month:view,
+  lockMonth:edit.kind!=="newdep",onPick:v=>{edit.date=v;syncDateFields();}});
+$("pExc").onclick=()=>openCal({mode:"date",value:edit.exc,month:view,
+  lockMonth:true,onPick:v=>{edit.exc=v;syncDateFields();}});
 $("excClear").onclick=()=>{edit.exc=null;syncDateFields();};
 $("segR").onclick=()=>setSeg(true);
 $("segO").onclick=()=>setSeg(false);
@@ -1039,7 +1046,7 @@ $("startPrompt").onclick=()=>openPanel("start");
 
 let txDate=null, txPay="digital";
 
-$("txDate").onclick=()=>openCal({mode:"date",value:txDate,month:view,onPick:v=>{txDate=v;render();}});
+$("txDate").onclick=()=>openCal({mode:"date",value:txDate,month:view,lockMonth:true,onPick:v=>{txDate=v;render();}});
 $("txPay").onclick=()=>{txPay=(txPay==="cash")?"digital":"cash";render();};
 $("txAdd").onclick=()=>{
   const d=$("txDesc").value.trim();
@@ -1047,14 +1054,14 @@ $("txAdd").onclick=()=>{
   if(!d||a===null||a<=0){toast("Vul een omschrijving en een bedrag in",null);return;}
   if(!state.categories.length){toast("Maak eerst een categorie aan",null);return;}
   const date=txDate||defaultDate();
-  /* een boeking hoort bij de maand van haar eigen datum, niet bij de maand
-     die je toevallig openhad */
-  const home=ymOfDate(fromISO(date));
-  editM(home).tx.push({id:uid(),label:d,amount:a,cat:$("txCat").value,date:date,pay:txPay});
+  /* Een boeking hoort bij de maand van haar eigen datum. De kiezer laat je
+     die maand niet meer verlaten, dus dit komt nu altijd op de lopende maand
+     uit; het blijft staan omdat het zo hoort en omdat de vooruitblikpagina
+     er straks op leunt. */
+  editM(ymOfDate(fromISO(date))).tx.push({id:uid(),label:d,amount:a,cat:$("txCat").value,date:date,pay:txPay});
   $("txDesc").value="";$("txAmt").value="";txDate=null;
   save();render();
   $("txDesc").focus();
-  if(home!==view)toast("“"+d+"” staat in "+ymLabel(home),()=>{view=home;render();},"Ga erheen");
 };
 
 /* Enter bevestigt, zodat je op een telefoon het toetsenbord niet hoeft
@@ -1149,7 +1156,7 @@ $("wipeBtn").onclick=()=>ask({
   body:"Je inkomsten, vaste lasten, boekingen en spaardoelen verdwijnen en de app begint opnieuw met de standaardcategorieën.",
   okLabel:"Wissen",
   danger:true,
-  onOk:()=>{view=TODAY_YM;replaceState(seed(),"Alles gewist");}
+  onOk:()=>replaceState(seed(),"Alles gewist")
 });
 
 /* ---------- weergave ---------- */
@@ -1175,37 +1182,61 @@ if(window.matchMedia){
   else if(mq.addListener)mq.addListener(onChange);
 }
 
-/* ---------- vegen tussen maanden ---------- */
+/* ---------- instellingenlade ---------- */
+let menuOpen=false;
+function openMenu(){
+  if(menuOpen)return;
+  menuOpen=true;
+  $("menuBtn").setAttribute("aria-expanded","true");
+  enterDialog("menuveil","menuBox",closeMenu);
+}
+function closeMenu(){
+  if(!menuOpen)return;
+  menuOpen=false;
+  $("menuBtn").setAttribute("aria-expanded","false");
+  leaveDialog("menuveil");
+}
+$("menuBtn").onclick=openMenu;
+$("menuClose").onclick=closeMenu;
+$("menuveil").addEventListener("click",e=>{if(e.target.id==="menuveil")closeMenu();});
+
+/* ---------- vegen om de lade te bedienen ---------- */
 (function swipe(){
-  const SLOP=60, MAX_MS=700;
+  const SLOP=60, MAX_MS=700, EDGE=24;
   let x0=null,y0=null,t0=0;
-  const area=document.querySelector(".wrap");
-  area.addEventListener("touchstart",e=>{
+  function start(e){
     x0=null;
-    if(dialogs.length||e.touches.length!==1)return;
+    if(e.touches.length!==1)return;
+    /* een ander venster heeft voorrang; de lade zelf mag wel wegvegen */
+    if(dialogs.length&&!menuOpen)return;
     /* niet kapen wat de gebruiker in een veld aan het doen is */
     if(e.target.closest("input,select,textarea"))return;
     x0=e.touches[0].clientX;y0=e.touches[0].clientY;t0=Date.now();
-  },{passive:true});
-  area.addEventListener("touchend",e=>{
+  }
+  function end(e){
     if(x0===null)return;
-    const t=e.changedTouches[0], dx=t.clientX-x0, dy=t.clientY-y0;
+    const t=e.changedTouches[0], dx=t.clientX-x0, dy=t.clientY-y0, from=x0;
     x0=null;
     if(Date.now()-t0>MAX_MS)return;
     /* duidelijk horizontaal, anders is het gewoon scrollen */
     if(Math.abs(dx)<SLOP||Math.abs(dx)<Math.abs(dy)*2)return;
-    view=ymShift(view,dx<0?1:-1);
-    render();
-  },{passive:true});
+    if(menuOpen){if(dx<0)closeMenu();return;}
+    /* alleen vanaf de rand, anders opent de lade bij elke zijwaartse beweging */
+    if(dx>0&&from<=EDGE)openMenu();
+  }
+  [document.querySelector(".wrap"),$("menuveil")].forEach(el=>{
+    el.addEventListener("touchstart",start,{passive:true});
+    el.addEventListener("touchend",end,{passive:true});
+  });
 })();
 
 /* ---------- maandwissel terwijl de app open staat ---------- */
 function refreshClock(){
   const n=startOfDay(new Date());
   if(n.getTime()===NOW.getTime())return;
-  const wasNow=(view===TODAY_YM);
   NOW=n;TODAY_YM=ymOfDate(n);
-  if(wasNow)view=TODAY_YM;
+  /* wordt het een nieuwe maand terwijl de app openstaat, dan schuift hij mee */
+  view=TODAY_YM;
   render();
 }
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshClock();});

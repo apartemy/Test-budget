@@ -24,17 +24,9 @@
 <div class="wrap">
 
   <div class="masthead">
-    <h1>Budget</h1>
+    <button class="burger" id="menuBtn" aria-label="Menu" aria-expanded="false">☰<span class="nudge" id="setNudge" style="display:none;"></span></button>
+    <h1 class="mname" id="mname"></h1>
     <div class="today num" id="today"></div>
-  </div>
-
-  <div class="monthbar">
-    <button class="navbtn" id="prevM" aria-label="Vorige maand">‹</button>
-    <div class="mtitle">
-      <div class="mname" id="mname"></div>
-      <button class="todaybtn" id="jumpNow" style="display:none;">Nu</button>
-    </div>
-    <button class="navbtn" id="nextM" aria-label="Volgende maand">›</button>
   </div>
 
   <div class="ledger">
@@ -100,8 +92,13 @@
     <button class="addbtn" id="addSav">Spaardoel toevoegen</button>
   </section>
 
-  <details class="settings">
-    <summary><span>Instellingen en gegevens<span class="nudge" id="setNudge" style="display:none;"></span></span></summary>
+</div>
+
+<div class="veil side" id="menuveil"><nav class="drawer" id="menuBox" role="dialog" aria-modal="true" aria-labelledby="menuTitle" tabindex="-1">
+  <div class="drawerhead">
+    <h2 id="menuTitle">Instellingen</h2>
+    <button class="x" id="menuClose" aria-label="Menu sluiten">×</button>
+  </div>
     <div class="setgrid">
       <div class="setrow">
         <span>Beginsaldo <span class="dim" id="startMonthLbl"></span></span>
@@ -134,11 +131,9 @@
         <span>Alles wissen</span>
         <button class="ghost danger" id="wipeBtn">Wissen</button>
       </div>
-    </div>
-    <input type="file" id="impFile" accept="application/json,.json" style="display:none;">
-  </details>
-
-</div>
+  </div>
+  <input type="file" id="impFile" accept="application/json,.json" style="display:none;">
+</nav></div>
 
 <div class="veil" id="veil"><div class="panel" id="panelBox" role="dialog" aria-modal="true" aria-labelledby="pTitle" tabindex="-1">
   <h3 id="pTitle">Bewerken</h3>
