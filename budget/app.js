@@ -8,6 +8,19 @@ const THEMES=["system","light","dark"];
 /* na zoveel dagen zonder export vraagt de app er in de instellingen om */
 const EXPORT_STALE_DAYS=30;
 
+/* Uitkomsten per maand onthouden. Zonder dit loopt elke aanroep de hele keten
+   naar het ijkpunt opnieuw af, en openWork() doet dat dertien keer per
+   weergave. Leeggooien zodra de gegevens of de datum veranderen; save() en
+   render() dekken samen elke plek die state aanraakt.
+   Staat hier bovenaan omdat save() al tijdens het laden kan draaien, als een
+   migratie iets heeft verplaatst. */
+const calcCache=new Map();
+function clearCalc(){calcCache.clear();}
+/* Ruim boven wat je met tikken kunt bereiken, want goMonth begrenst op tien
+   jaar. Alleen een keten van meer dan twintig jaar zonder één ijkpunt loopt
+   hier nog tegenaan. */
+const MAX_CHAIN=240;
+
 const $=id=>document.getElementById(id);
 const pad=n=>String(n).padStart(2,"0");
 const ymKey=(y,m)=>y+"_"+pad(m+1);
@@ -21,9 +34,9 @@ function startOfDay(d){const x=new Date(d);x.setHours(0,0,0,0);return x;}
 
 let NOW=startOfDay(new Date());
 let TODAY_YM=ymOfDate(NOW);
-/* De app toont alleen de lopende maand. `view` blijft bestaan omdat de hele
-   berekening er per maand op leunt, maar volgt voortaan alleen de klok; een
-   aparte pagina om vooruit te blikken en terug te kijken komt later. */
+/* De maand die op het scherm staat. Begint op vandaag en schuift mee als de
+   datum verspringt, maar je kunt er met de pijlen, de maandkiezer of een
+   veeg langs om vooruit te plannen of terug te kijken. */
 let view=TODAY_YM;
 
 function eur(n){return (n<0?"−":"")+"€"+Math.abs(n).toLocaleString("nl-NL",{minimumFractionDigits:2,maximumFractionDigits:2});}
@@ -130,6 +143,7 @@ function rehomeTx(d){
   if(moves.length)migrated=true;
 }
 function save(){
+  clearCalc();
   try{localStorage.setItem(KEY,JSON.stringify(state));}
   catch(e){toast("Opslaan lukt niet. De opslag is vol of je bent in privémodus.",null);}
 }
@@ -191,7 +205,7 @@ function firstMonth(){
 function startBalance(k,depth){
   depth=depth||0;
   if(hasStart(k)){const s=state.months[k].start;return{d:s.d||0,c:s.c||0};}
-  if(depth>24)return{d:0,c:0};
+  if(depth>MAX_CHAIN)return{d:0,c:0};
   const prev=ymShift(k,-1);
   /* Vóór de eerste vastgelegde maand valt niets door te rekenen, dus daar
      stopt de keten. Erná telt elke maand mee, ook een maand zonder eigen
@@ -212,6 +226,8 @@ function endBalance(k,depth){
   return{d:c.start.d+c.incExpD-c.fixPlanD-c.varD-c.savD,c:c.start.c+c.incExpC-c.fixPlanC-c.varC-c.savC};
 }
 function calc(k,depth){
+  const hit=calcCache.get(k);
+  if(hit)return hit;
   const m=readM(k);
   const past=k<TODAY_YM, future=k>TODAY_YM;
 
@@ -262,7 +278,7 @@ function calc(k,depth){
   const availD=start.d+incGotD-fixPaidD-varD-savD, availC=start.c+incGotC-fixPaidC-varC-savC;
   const freeD=start.d+incExpD-fixPlanD-varD-savD, freeC=start.c+incExpC-fixPlanC-varC-savC;
 
-  return{
+  const res={
     inc,exp,tx:m.tx.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")),
     start,incExpected,incGot,fixPlanned,fixPaid,varSpent,
     incExpD,incExpC,fixPlanD,fixPlanC,varD,varC,savD,savC,savMonth,
@@ -272,15 +288,21 @@ function calc(k,depth){
     outstanding:fixPlanned-fixPaid,
     incoming:incExpected-incGot
   };
+  calcCache.set(k,res);
+  return res;
 }
 
 /* ---------- render ---------- */
 function render(){
+  clearCalc();
   const k=view, c=calc(k), m=readM(k);
   const p=ymParse(k);
 
   $("today").textContent=NOW.getDate()+" "+MONTHS[NOW.getMonth()];
   $("mname").innerHTML=MONTHS[p.m]+'<span class="yr num">'+p.y+"</span>";
+  /* Een vaste aria-label zou de maandnaam wegduwen als toegankelijke naam,
+     en juist die wil je horen. Dus de maand erin meenemen. */
+  $("mname").setAttribute("aria-label","Maand kiezen, nu "+ymLabel(k));
   const atNow=(k===TODAY_YM);
   $("today").style.display=atNow?"":"none";
   $("jumpNow").style.display=atNow?"none":"";
@@ -541,6 +563,11 @@ function exportIsStale(){
 const SOON_DAYS=7;
 function renderTodo(c,k){
   const soon=new Date(NOW.getFullYear(),NOW.getMonth(),NOW.getDate()+SOON_DAYS);
+  /* Maanden vóór het laatste ijkpunt tellen niet mee in het bolletje, want
+     daar is het saldo opnieuw vastgesteld. Zonder uitleg lijkt het alsof de
+     app iets over het hoofd ziet. */
+  const anchor=anchorMonth();
+  const settled=!!anchor&&k<anchor;
   const open=[],ahead=[];
   c.exp.forEach(x=>{
     if(x.paid||!x.date)return;
@@ -562,7 +589,8 @@ function renderTodo(c,k){
       '<div class="ramt num">'+eur(x.amount)+"</div></div>"
     ).join("");
   let h="";
-  if(open.length)h+=group("Staat nog open",open,x=>dayLabel(x.date)+" · niet afgevinkt");
+  if(open.length)h+=group("Staat nog open",open,
+    x=>dayLabel(x.date)+(settled?" · verrekend in je ijkpunt":" · niet afgevinkt"));
   if(ahead.length)h+=group("Komt eraan",ahead,x=>dayLabel(x.date));
   bar.innerHTML=h;
   bar.style.display="";
@@ -1286,7 +1314,14 @@ $("wipeBtn").onclick=()=>ask({
 });
 
 /* ---------- door de maanden ---------- */
-function goMonth(k){view=k;render();}
+/* Tien jaar heen en terug is ruim genoeg om te plannen, en houdt de
+   doorrekenketen ver binnen zijn grens. */
+const HORIZON=120;
+function goMonth(k){
+  const floor=ymShift(TODAY_YM,-HORIZON), ceil=ymShift(TODAY_YM,HORIZON);
+  view=k<floor?floor:k>ceil?ceil:k;
+  render();
+}
 $("prevM").onclick=()=>goMonth(ymShift(view,-1));
 $("nextM").onclick=()=>goMonth(ymShift(view,1));
 $("jumpNow").onclick=()=>goMonth(TODAY_YM);

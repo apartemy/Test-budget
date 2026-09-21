@@ -33,6 +33,18 @@ const check = (n, c, x) => (c ? ok : fails).push(n + (c ? '' : '  <<< ' + JSON.s
   };
 
   // ---- openen en sluiten met de knop
+  // De maandknop moet zijn maand ook aan een schermlezer noemen; een vaste
+  // aria-label zou die tekst juist wegduwen.
+  const mLabel = await page.getAttribute('#mname', 'aria-label');
+  const nu = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli',
+    'augustus', 'september', 'oktober', 'november', 'december'][new Date().getMonth()];
+  check('maandknop: de naam noemt de maand', (mLabel || '').includes(nu), mLabel);
+  check('maandknop: en zegt dat je kunt kiezen', /kiez/i.test(mLabel || ''), mLabel);
+  await page.click('#nextM');
+  check('maandknop: de naam schuift mee', !(await page.getAttribute('#mname', 'aria-label')).includes(nu + ' '),
+    await page.getAttribute('#mname', 'aria-label'));
+  await page.click('#jumpNow');
+
   check('lade: begint dicht', !(await open()));
   check('hamburger: aria-expanded staat uit', (await page.getAttribute('#menuBtn', 'aria-expanded')) === 'false');
   await page.click('#menuBtn');

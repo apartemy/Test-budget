@@ -112,6 +112,73 @@ const check = (n, c, x) => (c ? ok : fails).push(n + (c ? '' : '  <<< ' + JSON.s
     (await startAt(3)).d === ahead.free, { start3: await startAt(3), ahead });
   check('en niet met wat er toevallig is afgevinkt', ahead.free !== ahead.avail, ahead);
 
+  // ---- de keten mag niet afbreken als je ver vooruit kijkt
+  // Vroeger kapte startBalance af na 24 stappen en begon hij opnieuw bij nul,
+  // waardoor vanaf +26 voor elke maand hetzelfde verkeerde bedrag verscheen.
+  await boot(SEED);
+  await page.click('#startPrompt');
+  await page.fill('#pAmount', '1000');
+  await page.click('#pSave');
+  for (const n of [25, 26, 50, 119]) {
+    const got = (await startAt(n)).d;
+    check('keten klopt nog op +' + n + ' maanden', got === 1000 + n * 1200, { n: n, got: got, hoort: 1000 + n * 1200 });
+  }
+
+  // ---- en doorklikken blijft binnen een verstandige horizon
+  const jump = async n => { for (let i = 0; i < n; i++) await page.click('#nextM'); };
+  await jump(30);
+  const after30 = await page.textContent('#carryAmt');
+  check('30x doorklikken geeft nog een kloppend bedrag',
+    after30.includes('37.000') , after30);
+  await page.click('#jumpNow');
+  await jump(200);
+  const years = await page.evaluate(() => {
+    const y = +document.getElementById('mname').textContent.match(/\d{4}/)[0];
+    return y - new Date().getFullYear();
+  });
+  check('200x doorklikken blijft binnen tien jaar', years <= 10, years + ' jaar vooruit');
+  await page.click('#jumpNow');
+
+  // ---- en dat alles zonder dat een weergave traag wordt
+  // Met twee jaar gegevens: openWork() draait calc() voor dertien maanden en
+  // elke calc() liep vroeger de hele keten opnieuw af. Dat was 58% van elke
+  // weergave, en render() draait bij elk vinkje.
+  const heavy = {
+    v: 8, theme: 'system', lastExport: new Date().toISOString().slice(0, 10),
+    income: Array.from({ length: 4 }, (_, i) => ({ id: 'i' + i, label: 'Inkomst ' + i, amount: 500 + i, day: 1 + i, kind: 'digital', shift: false })),
+    expenses: Array.from({ length: 25 }, (_, i) => ({ id: 'e' + i, label: 'Last ' + i, amount: 20 + i, day: (i % 28) + 1, pay: 'digital', shift: false })),
+    categories: Array.from({ length: 6 }, (_, i) => ({ id: 'c' + i, label: 'Cat ' + i, budget: 100 })),
+    savings: [{ id: 's1', label: 'Deposito', goal: 0, kind: 'term', amount: 0, termMonths: 12, deposits: [] }],
+    months: {}
+  };
+  {
+    const p = x => String(x).padStart(2, '0'), now = new Date();
+    for (let n = -24; n <= 0; n++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + n, 1);
+      const mk = d.getFullYear() + '_' + p(d.getMonth() + 1);
+      const iso = day => d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(day);
+      heavy.months[mk] = {
+        start: n === -24 ? { d: 1500, c: 100 } : null,
+        paid: Object.fromEntries(heavy.expenses.map(e => [e.id, true])),
+        recv: {}, exc: {}, skip: {}, oneoff: [],
+        tx: Array.from({ length: 20 }, (_, i) => ({ id: mk + 't' + i, label: 'Boeking ' + i, amount: 5 + i, cat: 'c' + (i % 6), date: iso((i % 27) + 1), pay: 'digital' }))
+      };
+      heavy.savings[0].deposits.push({ id: mk + 'd', amount: 100, date: iso(2), pay: 'digital' });
+    }
+  }
+  await boot(heavy);
+  const perf = await page.evaluate(() => {
+    const time = fn => { const t = performance.now(); fn(); return performance.now() - t; };
+    for (let i = 0; i < 5; i++) render();            // warmlopen
+    return { render: time(() => { for (let i = 0; i < 20; i++) render(); }) / 20,
+             openWork: time(() => openWork()) };
+  });
+  console.log('  info  zware dataset: render() ' + perf.render.toFixed(1) +
+    ' ms, openWork() ' + perf.openWork.toFixed(1) + ' ms');
+  // Vóór het geheugen was dit 14,8 ms op deze machine. De drempel staat ruim
+  // zodat een tragere machine geen vals alarm geeft maar een terugval wel.
+  check('render blijft vlot met twee jaar gegevens', perf.render < 8, perf.render.toFixed(1) + ' ms');
+
   check('geen fouten in de console', errors.length === 0, errors);
 
   console.log(ok.map(s => '  ok   ' + s).join('\n'));
