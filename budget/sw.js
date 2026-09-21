@@ -5,15 +5,15 @@
    - lettertypen van Google: runtime cache, faalt stil zonder internet
    Verhoog VERSION bij elke deploy zodat de oude cache wordt opgeruimd. */
 
-const VERSION = "budget-v7";
+const VERSION = "budget-v8";
 const SHELL = VERSION + "-shell";
 const RUNTIME = VERSION + "-runtime";
 
 const SHELL_FILES = [
   "./",
   "./index.html",
-  "./app.css",
-  "./app.js",
+  "./app.css?v=8",
+  "./app.js?v=8",
   "./manifest.webmanifest",
   "./icons/icon-32.png",
   "./icons/icon-180.png",
@@ -74,21 +74,32 @@ self.addEventListener("fetch", event => {
     return;
   }
 
-  /* lettertypen en eigen bestanden: cache eerst, anders netwerk en bewaren */
+  /* lettertypen en eigen bestanden: uit de cache, en tegelijk op de
+     achtergrond verversen.
+     Eerder stond hier "cache eerst en verder niets". Dat zette app.js en
+     app.css voorgoed vast: zolang VERSION gelijk bleef draaide er geen
+     activate, werd er geen cache opgeruimd, en kreeg het toestel dus nooit
+     een nieuw bestand te zien. Nu is het antwoord nog steeds meteen uit de
+     cache, maar de kopie in de cache loopt bij elke laadbeurt bij. */
   if (url.origin === self.location.origin || isFontHost(url)) {
     event.respondWith((async () => {
       const cached = await caches.match(req);
-      if (cached) return cached;
-      try {
-        const res = await fetch(req);
+      const fresh = fetch(req).then(res => {
         if (res && res.ok) {
-          const cache = await caches.open(RUNTIME);
-          cache.put(req, res.clone());
+          const copy = res.clone();
+          /* in de schil bijwerken als het bestand daar hoort, anders runtime,
+             zodat een opgeruimde schil niet stilletjes leegloopt */
+          caches.open(SHELL).then(async shell => {
+            const target = (await shell.match(req)) ? shell : await caches.open(RUNTIME);
+            target.put(req, copy);
+          }).catch(() => {});
         }
         return res;
-      } catch (e) {
-        return cached || Response.error();
-      }
+      }).catch(() => null);
+      /* event.waitUntil houdt de verversing in leven als de cache het
+         antwoord al heeft gegeven en de fetch nog loopt */
+      event.waitUntil(fresh);
+      return cached || (await fresh) || Response.error();
     })());
   }
 });

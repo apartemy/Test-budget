@@ -39,6 +39,30 @@ const check = (n, c, x) => (c ? ok : fails).push(n + (c ? '' : '  <<< ' + JSON.s
     num(appVersion) !== null && num(appVersion) === num(version),
     { appVersion, swVersion: version });
 
+  // Het derde stempel: het nummer achter app.js en app.css in index.html.
+  // Dat stempel doet het echte werk. Een toestel met een vastgelopen service
+  // worker krijgt pas iets nieuws te zien als het adres van het bestand
+  // verandert, want een ander adres is een andere sleutel in de cache.
+  const assetV = await page.evaluate(async u => {
+    const src = await (await fetch(new URL('index.html', u).href)).text();
+    const js = src.match(/app\.js\?v=(\d+)/), css = src.match(/app\.css\?v=(\d+)/);
+    return { js: js ? js[1] : null, css: css ? css[1] : null };
+  }, URL);
+  check('versie: app.js in index.html draagt een versienummer', assetV.js !== null, assetV);
+  check('versie: app.css draagt hetzelfde nummer', assetV.css === assetV.js, assetV);
+  check('versie: dat nummer loopt gelijk met app.js en sw.js',
+    assetV.js === num(appVersion), { assetV, appVersion, swVersion: version });
+
+  // En de service worker moet precies die adressen bewaren, anders valt
+  // offline om: een andere sleutel is een misser in de cache.
+  const shellV = await page.evaluate(async u => {
+    const src = await (await fetch(new URL('sw.js', u).href)).text();
+    const js = src.match(/"\.\/app\.js\?v=(\d+)"/), css = src.match(/"\.\/app\.css\?v=(\d+)"/);
+    return { js: js ? js[1] : null, css: css ? css[1] : null };
+  }, URL);
+  check('versie: sw.js bewaart dezelfde adressen als index.html vraagt',
+    shellV.js === assetV.js && shellV.css === assetV.css, { shellV, assetV });
+
   // ---- en die versie is ook echt te zien in de lade
   await page.click('#menuBtn');
   check('versie: de lade toont de versie', (await page.textContent('#appVer')) === appVersion,
@@ -83,13 +107,32 @@ const check = (n, c, x) => (c ? ok : fails).push(n + (c ? '' : '  <<< ' + JSON.s
   // Dit is precies het geval dat van buitenaf op een verkeerd bestand lijkt:
   // de app draait v7, maar er hangt nog een oudere cache. De lade hoort dat
   // te melden, en "Vernieuwen" hoort hem op te ruimen zonder gegevensverlies.
+  // Eerst het onschuldige geval: de eigen versie staat er, met daarnaast een
+  // oudere. Dat is een nieuwe versie die klaarstaat, geen storing, dus hier
+  // hoort geen waarschuwing. Anders schrikt de gebruiker van iets normaals.
   await page.evaluate(() => window.caches.open('budget-v1-shell'));
+  await page.click('#menuBtn');
+  await page.waitForFunction(() => document.getElementById('swNote').textContent.includes('v1'),
+    null, { timeout: 4000 }).catch(() => {});
+  const naastNote = await page.textContent('#swNote');
+  check('versie: een oudere cache naast de eigen versie wordt gemeld',
+    naastNote.includes('v1'), naastNote);
+  check('versie: maar niet als waarschuwing, want dat is normaal',
+    !(await page.evaluate(() => document.getElementById('swNote').classList.contains('warn'))), naastNote);
+  await page.keyboard.press('Escape');
+
+  // En nu het echte alarm: de versie die hier draait zit helemaal niet in de
+  // cache. Dan bedient de service worker iets anders dan wat je voor je hebt.
+  await page.evaluate(async () => {
+    for (const k of await window.caches.keys()) await window.caches.delete(k);
+    await window.caches.open('budget-v1-shell');
+  });
   await page.click('#menuBtn');
   await page.waitForFunction(() => document.getElementById('swNote').classList.contains('warn'),
     null, { timeout: 4000 }).catch(() => {});
   const warnNote = await page.textContent('#swNote');
-  check('versie: een achtergebleven cache wordt gemeld', warnNote.includes('v1'), warnNote);
-  check('versie: en als waarschuwing',
+  check('versie: een vreemde versie in de cache wordt gemeld', warnNote.includes('v1'), warnNote);
+  check('versie: en wel als waarschuwing',
     await page.evaluate(() => document.getElementById('swNote').classList.contains('warn')), warnNote);
 
   await page.click('#swRefresh');

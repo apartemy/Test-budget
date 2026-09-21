@@ -1,6 +1,6 @@
 # Browsertests
 
-Negen suites die de app in een echte Chromium aansturen. Ze bestaan om aan te
+Tien suites die de app in een echte Chromium aansturen. Ze bestaan om aan te
 tonen dat het opschonen geen enkele werking heeft weggenomen, en om dat bij
 volgende wijzigingen opnieuw te kunnen aantonen.
 
@@ -15,6 +15,7 @@ volgende wijzigingen opnieuw te kunnen aantonen.
 | `toast.test.js` | De melding met "Ongedaan maken": waar hij staat, dat hij geen knop eronder afvangt, dat hij na vier seconden of bij de volgende handeling verdwijnt, en dat scrollen en het toetsenbord hem juist niet wegvagen. |
 | `keyboard.test.js` | Focus, Escape, Tab binnen het venster, achtergrondvergrendeling en Enter als bevestiging. |
 | `offline.test.js` | Of de service worker zich registreert, of de app-shell inclusief `app.css` en `app.js` in de cache staat, of caches van oudere versies zijn opgeruimd, en of de app zonder internet nog opstart. De verwachte cachenaam leest hij uit `sw.js`, dus een versieverhoging breekt deze test niet. Hij legt ook `APP_VERSION` uit `app.js` naast `VERSION` uit `sw.js`, zodat die twee nooit uit de pas kunnen lopen, en controleert de versieregel in de lade plus de knop "Vernieuwen" op een achtergebleven cache. |
+| `stale.test.js` | Een toestel dat al vastzit op een oude build. De test bouwt de oude service worker na, laat een echte browser hem installeren, verwisselt daarna de map onder dezelfde server, en eist dat de app zichzelf herstelt: na twee openingen draait de nieuwe versie, zonder dat de gebruiker iets aanraakt. Deze suite start zijn eigen server en negeert `BUDGET_URL`. |
 
 ## Draaien
 

@@ -8,7 +8,7 @@ const THEMES=["system","light","dark"];
 /* Staat onderin de instellingenlade, zodat je aan de app zelf kunt zien welke
    build je voor je hebt. Het nummer moet gelijk lopen met VERSION in sw.js;
    test/offline.test.js legt die twee naast elkaar. */
-const APP_VERSION="v7 · 21 september 2026";
+const APP_VERSION="v8 · 21 september 2026";
 /* na zoveel dagen zonder export vraagt de app er in de instellingen om */
 const EXPORT_STALE_DAYS=30;
 
@@ -1470,12 +1470,21 @@ async function showServed(){
   try{vers=cachedVersions(await caches.keys());}catch(e){}
   if(!vers.length){set("De service worker bedient deze pagina, maar bewaart nog niets.");return;}
   const mine=verNum(APP_VERSION);
-  if(vers.length===1&&verNum(vers[0])===mine){
+  const heeft=vers.some(v=>verNum(v)===mine);
+  if(heeft&&vers.length===1){
     set("De service worker bewaart dezelfde versie ("+vers[0]+").");
     return;
   }
+  /* Naast de eigen versie nog een oudere: dat is een nieuwe versie die klaar
+     staat, geen storing. Die oude cache gaat vanzelf weg zodra de nieuwe
+     service worker het overneemt, dus hier hoort geen waarschuwing. */
+  if(heeft){
+    set("De service worker bewaart "+vers.join(" en ")+
+        ". De oude verdwijnt zodra de app opnieuw opstart.");
+    return;
+  }
   set("De service worker bewaart "+vers.join(" en ")+
-      ". Dat wijkt af van wat hier draait; tik op Vernieuwen om de oude bestanden weg te gooien.",true);
+      ". Dat is niet de versie die hier draait; tik op Vernieuwen om de oude bestanden weg te gooien.",true);
 }
 
 $("swRefresh").onclick=()=>ask({
@@ -1586,15 +1595,26 @@ if(loadFailed){
   if("serviceWorker" in navigator){
     window.addEventListener("load",()=>{
       navigator.serviceWorker.register("sw.js").then(reg=>{
+        const announce=sw=>toast("Nieuwe versie klaar",
+          ()=>{sw.postMessage("skipWaiting");location.reload();},"Nu herladen");
+        /* Stond er een nieuwe versie al klaar van een vorige sessie, dan komt
+           updatefound niet meer langs en bleef de melding vroeger uit. */
+        if(reg.waiting&&navigator.serviceWorker.controller)announce(reg.waiting);
         reg.addEventListener("updatefound",()=>{
           const sw=reg.installing;
           if(!sw)return;
           sw.addEventListener("statechange",()=>{
-            if(sw.state==="installed"&&navigator.serviceWorker.controller){
-              toast("Nieuwe versie klaar",()=>{sw.postMessage("skipWaiting");location.reload();},"Nu herladen");
-            }
+            if(sw.state==="installed"&&navigator.serviceWorker.controller)announce(sw);
           });
         });
+        /* Zonder deze aanroep kijkt de browser helemaal niet of er een nieuwe
+           sw.js is. Gemeten in Chromium: na een deploy werd sw.js geen enkele
+           keer opnieuw opgevraagd, dus draaide er nooit een activate en werd
+           de oude cache nooit opgeruimd. Eén keer bij het laden, en opnieuw
+           zodra het tabblad terugkomt, want een telefoon blijft dagen open. */
+        const look=()=>{reg.update().catch(()=>{});};
+        look();
+        document.addEventListener("visibilitychange",()=>{if(!document.hidden)look();});
       }).catch(()=>{});
     });
   }
