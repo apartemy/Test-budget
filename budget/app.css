@@ -283,6 +283,9 @@ section{margin-bottom:28px;}
 .setrow .seg button{padding:7px 4px;font-size:12px;}
 /* in de smalle lade mag een rij afbreken in plaats van te verdringen */
 .drawer .setrow{flex-wrap:wrap;}
+/* de versieregel is te lang voor één regel; de knop houdt zijn plek rechts,
+   ook als hij naar de volgende regel zakt */
+.setrow.verrow>button{margin-left:auto;}
 .drawer .setrow .seg{flex:1 1 100%;}
 /* stipje op de instellingenkop zolang er iets te doen is, zonder te zeuren */
 .nudge{
