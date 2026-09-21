@@ -103,6 +103,14 @@ function fix(d){
   if(!THEMES.includes(d.theme))d.theme="system";
   if(typeof d.lastExport!=="string")d.lastExport=null;
   d.expenses.forEach(e=>{if(!e.pay)e.pay="digital";});
+  /* Een maandelijkse post zonder beginmaand gold voorheen voor élke maand,
+     ook voor maanden van vóór het eerste gebruik. Zo kreeg augustus een
+     volledige maand inkomsten toegekend die er nooit was. Laat ze lopen vanaf
+     de vroegste maand met gegevens, en nooit later dan vandaag. */
+  const keys=Object.keys(d.months);
+  const earliest=keys.length?keys.reduce((a,b)=>a<b?a:b):TODAY_YM;
+  const begin=earliest<TODAY_YM?earliest:TODAY_YM;
+  d.income.concat(d.expenses).forEach(it=>{if(!it.from)it.from=begin;});
   d.savings.forEach(sv=>{
     if(!sv.kind)sv.kind="free";
     if(sv.kind==="term"){sv.deposits=sv.deposits||[];sv.termMonths=sv.termMonths||12;}
@@ -184,6 +192,15 @@ function savSplit(sv){
   return{locked:locked,free:free,next:next};
 }
 function fullDate(d){return d.getDate()+" "+MONTHS[d.getMonth()]+" "+d.getFullYear();}
+/* Loopt deze maandelijkse post in maand k nog niet? Dan telt hij daar niet
+   mee, en verzint de app geen geschiedenis van vóór je hem invoerde. */
+function runsYet(it,k){return !!it.from&&k<it.from;}
+/* Vroegste maand die iets kan laten zien: verder terug is per definitie leeg */
+function dataFloor(){
+  let f=firstMonth()||TODAY_YM;
+  state.income.concat(state.expenses).forEach(it=>{if(it.from&&it.from<f)f=it.from;});
+  return f<TODAY_YM?f:TODAY_YM;
+}
 function effDate(k,item){
   const m=readM(k);
   if(m.exc&&m.exc[item.id])return fromISO(m.exc[item.id]);
@@ -233,7 +250,7 @@ function calc(k,depth){
 
   const inc=[];
   state.income.forEach(it=>{
-    if(m.skip[it.id])return;
+    if(m.skip[it.id]||runsYet(it,k))return;
     const d=effDate(k,it);
     let got;
     if(d) got = past || (!future && startOfDay(d)<=NOW);
@@ -248,7 +265,7 @@ function calc(k,depth){
 
   const exp=[];
   state.expenses.forEach(it=>{
-    if(m.skip[it.id])return;
+    if(m.skip[it.id]||runsYet(it,k))return;
     exp.push({ref:it,id:it.id,label:it.label,amount:it.amount,date:effDate(k,it),paid:!!m.paid[it.id],rec:true,exc:!!m.exc[it.id],pay:it.pay||"digital"});
   });
   m.oneoff.filter(o=>o.kind==="expense").forEach(o=>{
@@ -306,6 +323,8 @@ function render(){
   const atNow=(k===TODAY_YM);
   $("today").style.display=atNow?"":"none";
   $("jumpNow").style.display=atNow?"none":"";
+  /* verder terug is per definitie leeg, dus die pijl heeft geen doel */
+  $("prevM").style.visibility=(k<=dataFloor())?"hidden":"visible";
 
   $("heroLbl").textContent=(k===TODAY_YM)?"Beschikbaar nu":(k<TODAY_YM?"Eindsaldo van die maand":"Verwacht beschikbaar");
   /* voorbij en lopend tonen wat er werkelijk staat, komend wat er verwacht
@@ -317,7 +336,8 @@ function render(){
   const dv=live?c.availD:c.freeD, cv=live?c.availC:c.freeC;
   setAmount($("sDig"),dv);
   setAmount($("sCash"),cv);
-  setAmount($("sFree"),c.free);
+  /* op een komende maand is niets hiervan bezit, dus dat moet het label zeggen */
+  $("digLbl").textContent=(k>TODAY_YM)?"Verwacht op rekening":"Op rekening";
 
   const fixPct=c.fixPlanned>0?Math.min(100,c.fixPaid/c.fixPlanned*100):0;
   $("mFix").style.width=fixPct+"%";
@@ -467,7 +487,11 @@ function render(){
     $("carryLbl").innerHTML=explicit
       ? 'Saldo vastgezet<span class="tag exc">ijkpunt</span>'
       : "Meegenomen uit "+ymLabel(ymShift(k,-1));
-    $("carryAmt").textContent=eur(carryTotal);
+    /* met contant erbij het bedrag opsplitsen, zodat het aansluit op de
+       tijdlijn eronder die alleen de rekening volgt */
+    $("carryAmt").textContent=c.start.c!==0
+      ? eur(c.start.d)+" + "+eur(c.start.c)+" contant"
+      : eur(carryTotal);
   }else{
     carry.style.display="none";
   }
@@ -494,7 +518,7 @@ function render(){
     : (hasAnyData()?"Nog nooit geëxporteerd.":"");
   $("exportNote").className="setnote"+(stale?" warn":"");
 
-  renderTodo(c,k);
+  renderFlow(c,k);
   const todo=openWork();
   $("setNudge").style.display=(stale||todo.length)?"inline-block":"none";
   const link=$("todoLink");
@@ -560,46 +584,82 @@ function exportIsStale(){
 /* Wat er in de maand die je bekijkt nog moet gebeuren: lasten die eraan
    komen, en lasten die al voorbij zijn zonder vinkje. Die laatste groep is
    het vangnet onder de doorrekening, want die houdt het geld op je saldo. */
-const SOON_DAYS=7;
-function renderTodo(c,k){
-  const soon=new Date(NOW.getFullYear(),NOW.getMonth(),NOW.getDate()+SOON_DAYS);
-  /* Maanden vóór het laatste ijkpunt tellen niet mee in het bolletje, want
-     daar is het saldo opnieuw vastgesteld. Zonder uitleg lijkt het alsof de
-     app iets over het hoofd ziet. */
-  const anchor=anchorMonth();
-  const settled=!!anchor&&k<anchor;
-  const open=[],ahead=[];
-  c.exp.forEach(x=>{
-    if(x.paid||!x.date)return;
-    const d=startOfDay(x.date);
-    if(d<=NOW)open.push(x);
-    else if(d<=soon)ahead.push(x);
+/* ---------- tijdlijn ----------
+   Een maandtotaal vertelt je niet wanneer het krap wordt. Deze lijst wel: hij
+   begint bij wat er nu op je rekening staat en loopt per gebeurtenis door.
+   Alleen de rekening, want contant geld heeft geen betaaldatum en hoort dus
+   niet in een lijst op datum. */
+function buildFlow(c,k){
+  const rows=[];
+  const dated=[],undated=[];
+  const D=x=>(x.kind||x.pay)!=="cash";
+  c.exp.forEach(x=>{if(!x.paid&&D(x))(x.date?dated:undated).push({x:x,sign:-1});});
+  c.inc.forEach(x=>{if(!x.got&&D(x))(x.date?dated:undated).push({x:x,sign:1});});
+  dated.sort((a,b)=>a.x.date-b.x.date);
+  /* wat er al is gebeurd zit hier al in verwerkt, dus hierop bouwen we door */
+  let bal=c.availD;
+  /* Erbij zeggen welke pot dit volgt, anders staan er straks vier totalen op
+     het scherm zonder dat duidelijk is welke waarbij hoort. */
+  rows.push({kind:"start",bal:bal,label:((k===TODAY_YM)?"vandaag":"begin van de maand")+" · op rekening"});
+  dated.forEach(e=>{
+    bal+=e.sign*e.x.amount;
+    rows.push({kind:"event",bal:bal,sign:e.sign,item:e.x,
+      overdue:startOfDay(e.x.date)<=NOW&&e.sign<0});
   });
-  const bar=$("todoBar");
-  if(!open.length&&!ahead.length){bar.style.display="none";bar.innerHTML="";return;}
-  const group=(label,items,note)=>
-    '<div class="glabel"><span>'+label+'</span><span class="num">'+
-    eur(items.reduce((s,x)=>s+x.amount,0))+"</span></div>"+
-    items.map(x=>
-      '<div class="row">'+
-      '<button class="check" data-toggle="paid" data-id="'+x.id+
-      '" aria-pressed="false" aria-label="Markeer als betaald">✓</button>'+
-      '<div class="rinfo"><div class="rname">'+esc(x.label)+"</div>"+
-      '<div class="rsub">'+note(x)+"</div></div>"+
-      '<div class="ramt num">'+eur(x.amount)+"</div></div>"
-    ).join("");
+  /* het cijfer dat naar de volgende maand doorrolt; bij posten zonder vaste
+     dag wijkt dat af van de laatste regel, en die staan er daarom onder */
+  rows.push({kind:"end",bal:(k<TODAY_YM)?c.availD:c.freeD,label:"eind van de maand · op rekening"});
+  let low=rows[0];
+  rows.forEach(r=>{if(r.kind!=="end"&&r.bal<low.bal)low=r;});
+  return{rows:rows,low:low,undated:undated};
+}
+function renderFlow(c,k){
+  const box=$("flow");
+  const f=buildFlow(c,k);
+  if(f.rows.length<=2&&!f.undated.length){box.style.display="none";box.innerHTML="";return;}
+  const marked=f.low.bal<f.rows[0].bal;
   let h="";
-  if(open.length)h+=group("Staat nog open",open,
-    x=>dayLabel(x.date)+(settled?" · verrekend in je ijkpunt":" · niet afgevinkt"));
-  if(ahead.length)h+=group("Komt eraan",ahead,x=>dayLabel(x.date));
-  bar.innerHTML=h;
-  bar.style.display="";
+  /* de eindregel hoort onderaan, dus de posten zonder vaste dag komen ervóór */
+  const endRow=f.rows[f.rows.length-1];
+  f.rows.slice(0,-1).forEach(r=>{
+    if(r.kind!=="event"){
+      h+='<div class="fl edge"><span>'+r.label+'</span><span class="num'+
+        (r.bal<0?" neg":"")+'">'+eur(r.bal)+"</span></div>";
+      return;
+    }
+    const x=r.item;
+    h+='<div class="fl'+(r.overdue?" open":"")+(r===f.low&&marked?" low":"")+'">'+
+      '<button class="check" data-toggle="'+(r.sign<0?"paid":"recv")+'" data-id="'+x.id+
+      '" aria-pressed="false" aria-label="'+(r.sign<0?"Markeer als betaald":"Markeer als ontvangen")+'">✓</button>'+
+      '<div class="fi"><div class="fn">'+esc(x.label)+"</div>"+
+      '<div class="fd">'+dayLabel(x.date)+(r.overdue?" · staat nog open":"")+
+      (r===f.low&&marked?" · laagste punt":"")+"</div></div>"+
+      '<div class="fm num'+(r.sign<0?" out":"")+'">'+(r.sign<0?"−":"+")+eur(x.amount).replace("€","€")+"</div>"+
+      '<div class="fb num'+(r.bal<0?" neg":"")+'">'+eur(r.bal)+"</div></div>";
+  });
+  if(f.undated.length){
+    h+='<div class="fl edge sub"><span>Zonder vaste dag</span><span></span></div>';
+    f.undated.forEach(e=>{
+      const x=e.x;
+      h+='<div class="fl">'+
+        '<button class="check" data-toggle="'+(e.sign<0?"paid":"recv")+'" data-id="'+x.id+
+        '" aria-pressed="false" aria-label="'+(e.sign<0?"Markeer als betaald":"Markeer als ontvangen")+'">✓</button>'+
+        '<div class="fi"><div class="fn">'+esc(x.label)+"</div>"+
+        '<div class="fd">vink af wanneer het gebeurt</div></div>'+
+        '<div class="fm num'+(e.sign<0?" out":"")+'">'+(e.sign<0?"−":"+")+eur(x.amount)+"</div>"+
+        '<div class="fb"></div></div>';
+    });
+  }
+  h+='<div class="fl edge"><span>'+endRow.label+'</span><span class="num'+
+    (endRow.bal<0?" neg":"")+'">'+eur(endRow.bal)+"</span></div>";
+  box.innerHTML=h;
+  box.style.display="";
 }
 
 /* bedrag plus de negatief-opmaak in één keer */
 function setAmount(el,n){
   el.textContent=eur(n);
-  el.className="v num"+(n<0?" neg":"");
+  el.className="num"+(n<0?" neg":"");
 }
 /* posten die deze maand zijn overgeslagen, identiek voor inkomsten en lasten */
 function skippedRows(items,editKind){
@@ -838,9 +898,9 @@ function openPanel(kind,id){
   const FAM={income:"income",newincome:"income",oneincome:"income",
              expense:"expense",newexpense:"expense",oneexpense:"expense"};
   const family=(kind==="newone")?(id==="income"?"income":"expense"):(FAM[kind]||null);
-  edit={kind:kind,id:id,family:family,day:null,date:null,exc:null,ckind:"digital",pay:"digital",shift:false,skip:false,rec:true};
+  edit={kind:kind,id:id,family:family,day:null,date:null,exc:null,ckind:"digital",pay:"digital",shift:false,skip:false,rec:true,from:view};
   const m=readM(view);
-  ["fType","fLabel","fAmount","fKind","fPay","fCash","fDay","fDate","fShift","fExc","fSkip","fGoal","fSavKind","fTerm","fDir"].forEach(f=>show(f,false));
+  ["fType","fLabel","fAmount","fKind","fPay","fCash","fDay","fDate","fShift","fExc","fSkip","fGoal","fSavKind","fTerm","fDir","fFrom"].forEach(f=>show(f,false));
   $("excMonth").textContent=ymLabel(view);
   $("pLabel").value="";$("pAmount").value="";$("pGoal").value="";$("pCash").value="";$("pTerm").value="";
 
@@ -853,6 +913,7 @@ function openPanel(kind,id){
     if(it){
       $("pLabel").value=it.label;$("pAmount").value=toInput(it.amount);
       edit.day=it.day;edit.ckind=it.kind;edit.shift=!!it.shift;
+      edit.from=it.from||view;
       edit.exc=m.exc[it.id]||null;edit.skip=!!m.skip[it.id];
       show("fExc",true);show("fSkip",true);
     }
@@ -867,7 +928,7 @@ function openPanel(kind,id){
     if(it){
       $("pLabel").value=it.label;$("pAmount").value=toInput(it.amount);
       edit.day=it.day;edit.exc=m.exc[it.id]||null;edit.skip=!!m.skip[it.id];edit.pay=it.pay||"digital";
-      edit.shift=!!it.shift;
+      edit.shift=!!it.shift;edit.from=it.from||view;
       show("fExc",true);show("fSkip",true);
     }else{edit.day=1;}
     setPay(edit.pay);setSkip(edit.skip);setShift(edit.shift);
@@ -968,6 +1029,8 @@ function syncDateFields(){
   show("fDay",edit.rec);
   show("fDate",!edit.rec);
   show("fShift",edit.rec&&!!edit.day);
+  show("fFrom",edit.rec);
+  $("pFrom").textContent=ymLabel(edit.from||view);
   $("pDay").innerHTML=edit.day?("Dag "+edit.day):'<span class="ph">Geen vaste dag</span>';
   $("pDate").innerHTML=edit.date?dayLabel(fromISO(edit.date)):'<span class="ph">Vandaag</span>';
   $("pExc").innerHTML=edit.exc?dayLabel(fromISO(edit.exc)):'<span class="ph">Geen afwijking</span>';
@@ -1054,27 +1117,27 @@ function savePanel(){
   const m=editM(view);
   if(k==="oneincome"||k==="oneexpense"){
     m.oneoff=m.oneoff.filter(x=>x.id!==edit.id);
-    if(edit.family==="income")state.income.push({id:uid(),label:label,amount:amt,day:edit.day,kind:edit.ckind,shift:edit.shift});
-    else state.expenses.push({id:uid(),label:label,amount:amt,day:edit.day,pay:edit.pay,shift:edit.shift});
+    if(edit.family==="income")state.income.push({id:uid(),label:label,amount:amt,day:edit.day,kind:edit.ckind,shift:edit.shift,from:edit.from||view});
+    else state.expenses.push({id:uid(),label:label,amount:amt,day:edit.day,pay:edit.pay,shift:edit.shift,from:edit.from||view});
     save();render();closePanel();return;
   }
 
   if(k==="income"||k==="newincome"){
     if(k==="newincome"){
-      state.income.push({id:uid(),label:label,amount:amt,day:edit.day,kind:edit.ckind,shift:edit.shift});
+      state.income.push({id:uid(),label:label,amount:amt,day:edit.day,kind:edit.ckind,shift:edit.shift,from:edit.from||view});
     }else{
       const it=state.income.find(x=>x.id===edit.id);
-      it.label=label;it.amount=amt;it.day=edit.day;it.kind=edit.ckind;it.shift=edit.shift;
+      it.label=label;it.amount=amt;it.day=edit.day;it.kind=edit.ckind;it.shift=edit.shift;it.from=edit.from||view;
       applyExcSkip(m,edit.id);
     }
     save();render();closePanel();return;
   }
   if(k==="expense"||k==="newexpense"){
     if(k==="newexpense"){
-      state.expenses.push({id:uid(),label:label,amount:amt,day:edit.day,pay:edit.pay,shift:edit.shift});
+      state.expenses.push({id:uid(),label:label,amount:amt,day:edit.day,pay:edit.pay,shift:edit.shift,from:edit.from||view});
     }else{
       const it=state.expenses.find(x=>x.id===edit.id);
-      it.label=label;it.amount=amt;it.day=edit.day;it.pay=edit.pay;it.shift=edit.shift;
+      it.label=label;it.amount=amt;it.day=edit.day;it.pay=edit.pay;it.shift=edit.shift;it.from=edit.from||view;
       applyExcSkip(m,edit.id);
     }
     save();render();closePanel();return;
@@ -1104,6 +1167,8 @@ $("pDate").onclick=()=>openCal({mode:"date",value:edit.date,month:view,
 $("pExc").onclick=()=>openCal({mode:"date",value:edit.exc,month:view,
   lockMonth:true,onPick:v=>{edit.exc=v;syncDateFields();}});
 $("excClear").onclick=()=>{edit.exc=null;syncDateFields();};
+$("pFrom").onclick=()=>openCal({mode:"month",value:edit.from||view,month:edit.from||view,
+  clearable:false,onPick:v=>{if(v){edit.from=v;syncDateFields();}}});
 $("segR").onclick=()=>setSeg(true);
 $("segO").onclick=()=>setSeg(false);
 $("segD").onclick=()=>setKind("digital");
@@ -1318,7 +1383,9 @@ $("wipeBtn").onclick=()=>ask({
    doorrekenketen ver binnen zijn grens. */
 const HORIZON=120;
 function goMonth(k){
-  const floor=ymShift(TODAY_YM,-HORIZON), ceil=ymShift(TODAY_YM,HORIZON);
+  /* Niet verder terug dan de eerste maand die iets kan tonen, en niet verder
+     vooruit dan tien jaar. */
+  const floor=dataFloor(), ceil=ymShift(TODAY_YM,HORIZON);
   view=k<floor?floor:k>ceil?ceil:k;
   render();
 }

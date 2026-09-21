@@ -28,7 +28,7 @@ const server = http.createServer((req, res) => {
 server.listen(0, '127.0.0.1', async () => {
   const url = `http://127.0.0.1:${server.address().port}/index.html`;
   const suites = ['mechanics.test.js', 'features.test.js', 'month.test.js', 'carry.test.js',
-    'reminder.test.js', 'menu.test.js', 'toast.test.js', 'keyboard.test.js', 'offline.test.js'];
+    'timeline.test.js', 'menu.test.js', 'toast.test.js', 'keyboard.test.js', 'offline.test.js'];
   let failed = 0;
   for (const suite of suites) {
     console.log(`\n=== ${suite} ===`);

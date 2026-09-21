@@ -92,15 +92,16 @@ const check = (n, c, x) => (c ? ok : fails).push(n + (c ? '' : '  <<< ' + JSON.s
 
   // nu afvinken in de vorige maand en kijken of alles erna meezakt
   await page.click('#prevM');
-  check('de balk toont de openstaande last',
-    (await page.textContent('#todoBar')).includes('Huur'), await page.textContent('#todoBar'));
-  await page.click('#todoBar .check');
-  check('de balk is leeg na afvinken', !(await page.isVisible('#todoBar')));
+  check('de tijdlijn toont de openstaande last',
+    (await page.textContent('#flow')).includes('Huur'), await page.textContent('#flow'));
+  await page.click('#flow .fl.open .check');
+  check('de post is uit de tijdlijn na afvinken',
+    !(await page.textContent('#flow')).includes('Huur'), await page.textContent('#flow'));
   await page.click('#jumpNow');
   check('afvinken haalt de 800 alsnog van het saldo', (await startAt(0)).d === 2200, await startAt(0));
   check('en van elke maand erna', (await startAt(2)).d === 4600, await startAt(2));
   check('het bolletje brandt nog zolang deze maand ook openstaat', await page.isVisible('#setNudge'));
-  await page.click('#todoBar .check');
+  await page.click('#flow .fl.open .check');
   check('het bolletje gaat uit als alles is afgevinkt', !(await page.isVisible('#setNudge')));
 
   // ---- een komende maand rolt door op geplande bedragen

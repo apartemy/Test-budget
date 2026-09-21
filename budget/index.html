@@ -38,15 +38,14 @@
     <button type="button" class="carry" id="carryRow" style="display:none;">
       <span id="carryLbl"></span><span class="num" id="carryAmt"></span>
     </button>
-    <div class="split">
-      <div><div class="lbl">Op rekening</div><div class="v num" id="sDig">€0</div></div>
-      <div><div class="lbl">Contant</div><div class="v num" id="sCash">€0</div></div>
-      <div><div class="lbl">Over na vaste lasten</div><div class="v num" id="sFree">€0</div></div>
+    <div class="pots">
+      <span><span class="lbl" id="digLbl">Op rekening</span> <b class="num" id="sDig">€0</b></span>
+      <span><span class="lbl">Contant</span> <b class="num" id="sCash">€0</b></span>
     </div>
   </div>
   <button class="startprompt" id="startPrompt" style="display:none;">Stel eenmalig je werkelijke saldo in. Daarna rolt elke maand vanzelf door naar de volgende.</button>
 
-  <div class="todo" id="todoBar" style="display:none;"></div>
+  <div class="flow" id="flow" style="display:none;"></div>
 
   <div class="meters">
     <div class="meter">
@@ -194,6 +193,12 @@
     <label>Datum, optioneel</label>
     <button type="button" class="pickbtn" id="pDate"></button>
     <div class="hint">Laat je dit leeg, dan gebruikt de app vandaag.</div>
+  </div>
+
+  <div class="field hidden" id="fFrom">
+    <label>Loopt vanaf</label>
+    <button type="button" class="pickbtn" id="pFrom"></button>
+    <div class="hint">Maanden daarvóór blijven leeg. Staat standaard op de maand waarin je de post aanmaakt.</div>
   </div>
 
   <div class="field hidden" id="fShift">

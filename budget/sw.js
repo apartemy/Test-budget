@@ -5,7 +5,7 @@
    - lettertypen van Google: runtime cache, faalt stil zonder internet
    Verhoog VERSION bij elke deploy zodat de oude cache wordt opgeruimd. */
 
-const VERSION = "budget-v6";
+const VERSION = "budget-v7";
 const SHELL = VERSION + "-shell";
 const RUNTIME = VERSION + "-runtime";
 

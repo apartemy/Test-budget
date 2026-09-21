@@ -30,6 +30,23 @@ const MONTHS = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli',
     check('geen aparte maandbalk, alles zit in de kop', (await page.locator('.monthbar').count()) === 0);
     check('geen knop "Nu" zolang je op deze maand staat', !(await page.isVisible('#jumpNow')));
     check('de datum van vandaag staat er wel', await page.isVisible('#today'));
+    // In een lege app valt er niets terug te kijken, dus die pijl hoort weg
+    check('lege app: geen pijl terug', !(await page.isVisible('#prevM')));
+
+    // Vanaf hier met gegevens die drie maanden terug beginnen, zodat
+    // terugbladeren wél ergens heen gaat.
+    await page.evaluate(() => {
+      const p = x => String(x).padStart(2, '0');
+      const key = n => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + n); return d.getFullYear() + '_' + p(d.getMonth() + 1); };
+      localStorage.setItem('budget_v8', JSON.stringify({
+        v: 8, theme: 'system', lastExport: null, categories: [], savings: [], income: [],
+        expenses: [{ id: 'e1', label: 'Huur', amount: 500, day: 1, pay: 'digital', shift: false, from: key(-3) }],
+        months: { [key(-3)]: { start: { d: 2000, c: 0 }, paid: { e1: true }, recv: {}, exc: {}, skip: {}, oneoff: [], tx: [] } }
+      }));
+    });
+    await page.reload();
+    await page.waitForFunction(() => document.getElementById('mname').textContent.length > 0);
+    check('met gegevens: pijl terug is er wel', await page.isVisible('#prevM'));
 
     // ---- pijlen
     await page.click('#nextM');
@@ -49,6 +66,13 @@ const MONTHS = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli',
     check('"Nu" brengt je terug naar deze maand',
       (await label()).includes(MONTHS[now.getMonth()]), await label());
 
+    // ---- de ondergrens: niet verder terug dan de eerste maand met gegevens
+    for (let i = 0; i < 8; i++) { if (await page.isVisible('#prevM')) await page.click('#prevM'); }
+    check('terugbladeren stopt bij de eerste maand met gegevens',
+      (await label()).includes(MONTHS[monthOf(-3).getMonth()]), await label());
+    check('en de pijl terug verdwijnt daar', !(await page.isVisible('#prevM')));
+    await page.click('#jumpNow');
+
     // ---- maandkiezer
     await page.click('#mname');
     check('maandkiezer opent', await page.isVisible('#calveil.open'));
@@ -58,9 +82,10 @@ const MONTHS = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli',
     await page.click('#cNext');
     check('de pijl stapt een heel jaar', (await page.textContent('#cTitle')) === String(now.getFullYear() + 1));
     await page.click('#cPrev');
-    const target = MONTHS.indexOf(MONTHS[(now.getMonth() + 5) % 12]);
-    await page.click('.cal button[data-ym$="_' + String(target + 1).padStart(2, '0') + '"]');
-    check('een maand kiezen springt erheen', (await label()).includes(MONTHS[target]), await label());
+    // December van het getoonde jaar: altijd op of na vandaag, dus nooit
+    // tegen de ondergrens aan, welke maand het vandaag ook is.
+    await page.click('.cal button[data-ym$="_12"]');
+    check('een maand kiezen springt erheen', (await label()).includes('december'), await label());
     await page.click('#mname');
     await page.click('#cToday');
     check('"Deze maand" in de kiezer brengt je terug',
