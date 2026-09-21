@@ -5,6 +5,10 @@ const MONTHS=["januari","februari","maart","april","mei","juni","juli","augustus
 const DOW=["ma","di","wo","do","vr","za","zo"];
 const KEY="budget_v8";
 const THEMES=["system","light","dark"];
+/* Staat onderin de instellingenlade, zodat je aan de app zelf kunt zien welke
+   build je voor je hebt. Het nummer moet gelijk lopen met VERSION in sw.js;
+   test/offline.test.js legt die twee naast elkaar. */
+const APP_VERSION="v7 · 21 september 2026";
 /* na zoveel dagen zonder export vraagt de app er in de instellingen om */
 const EXPORT_STALE_DAYS=30;
 
@@ -1424,6 +1428,9 @@ function openMenu(){
   if(menuOpen)return;
   menuOpen=true;
   $("menuBtn").setAttribute("aria-expanded","true");
+  /* pas opvragen als de lade opengaat: caches.keys() is een belofte en hoeft
+     niet bij elke weergave te draaien */
+  showServed();
   enterDialog("menuveil","menuBox",closeMenu);
 }
 function closeMenu(){
@@ -1435,6 +1442,60 @@ function closeMenu(){
 $("menuBtn").onclick=openMenu;
 $("menuClose").onclick=closeMenu;
 $("menuveil").addEventListener("click",e=>{if(e.target.id==="menuveil")closeMenu();});
+
+/* ---------- welke versie draait hier ---------- */
+/* Zonder dit is van buitenaf niet te zien welke build je voor je hebt, en
+   lijkt een oude service worker precies op een verkeerd bestand. De regel
+   hierboven zegt wat er nú draait; de regel eronder wat de service worker nog
+   bewaart. Lopen die uiteen, dan zit het probleem in de cache. */
+const verNum=s=>{const m=/v(\d+)/.exec(s||"");return m?m[1]:"";};
+$("appVer").textContent=APP_VERSION;
+
+function cachedVersions(keys){
+  const set=new Set();
+  keys.forEach(k=>{
+    const m=/^budget-(v\d+)-(shell|runtime)$/.exec(k);
+    if(m)set.add(m[1]);
+  });
+  return Array.from(set).sort();
+}
+async function showServed(){
+  const note=$("swNote");
+  const set=(t,warn)=>{note.textContent=t;note.className="setnote"+(warn?" warn":"");};
+  if(!("serviceWorker" in navigator)||!navigator.serviceWorker.controller){
+    set("Geen service worker actief: je ziet de bestanden zoals ze op de server staan.");
+    return;
+  }
+  let vers=[];
+  try{vers=cachedVersions(await caches.keys());}catch(e){}
+  if(!vers.length){set("De service worker bedient deze pagina, maar bewaart nog niets.");return;}
+  const mine=verNum(APP_VERSION);
+  if(vers.length===1&&verNum(vers[0])===mine){
+    set("De service worker bewaart dezelfde versie ("+vers[0]+").");
+    return;
+  }
+  set("De service worker bewaart "+vers.join(" en ")+
+      ". Dat wijkt af van wat hier draait; tik op Vernieuwen om de oude bestanden weg te gooien.",true);
+}
+
+$("swRefresh").onclick=()=>ask({
+  title:"Vernieuwen",
+  body:"De bewaarde bestanden worden weggegooid en de app haalt alles opnieuw op. Je gegevens blijven staan: die zitten in de opslag van deze browser en niet in de cache.",
+  okLabel:"Vernieuwen",
+  onOk:async()=>{
+    try{
+      if("serviceWorker" in navigator){
+        const regs=await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r=>r.unregister()));
+      }
+      if(window.caches){
+        const keys=await caches.keys();
+        await Promise.all(keys.map(k=>caches.delete(k)));
+      }
+    }catch(e){}
+    location.reload();
+  }
+});
 
 /* ---------- vegen om de lade te bedienen ---------- */
 (function swipe(){
