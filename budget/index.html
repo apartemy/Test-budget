@@ -25,20 +25,28 @@
 
   <div class="masthead">
     <button class="burger" id="menuBtn" aria-label="Menu" aria-expanded="false">☰<span class="nudge" id="setNudge" style="display:none;"></span></button>
-    <h1 class="mname" id="mname"></h1>
+    <button class="navbtn" id="prevM" aria-label="Vorige maand">‹</button>
+    <h1 class="mname"><button type="button" id="mname" aria-label="Kies een maand"></button></h1>
+    <button class="navbtn" id="nextM" aria-label="Volgende maand">›</button>
     <div class="today num" id="today"></div>
+    <button class="todaybtn" id="jumpNow" style="display:none;">Nu</button>
   </div>
 
   <div class="ledger">
     <div class="lbl" id="heroLbl">Beschikbaar nu</div>
     <div class="big num" id="heroBig">€0</div>
+    <button type="button" class="carry" id="carryRow" style="display:none;">
+      <span id="carryLbl"></span><span class="num" id="carryAmt"></span>
+    </button>
     <div class="split">
       <div><div class="lbl">Op rekening</div><div class="v num" id="sDig">€0</div></div>
       <div><div class="lbl">Contant</div><div class="v num" id="sCash">€0</div></div>
       <div><div class="lbl">Over na vaste lasten</div><div class="v num" id="sFree">€0</div></div>
     </div>
   </div>
-  <button class="startprompt" id="startPrompt" style="display:none;">Beginsaldo van deze maand staat op nul. Tik om je werkelijke saldo in te vullen.</button>
+  <button class="startprompt" id="startPrompt" style="display:none;">Stel eenmalig je werkelijke saldo in. Daarna rolt elke maand vanzelf door naar de volgende.</button>
+
+  <div class="todo" id="todoBar" style="display:none;"></div>
 
   <div class="meters">
     <div class="meter">
@@ -100,8 +108,9 @@
     <button class="x" id="menuClose" aria-label="Menu sluiten">×</button>
   </div>
     <div class="setgrid">
+      <button type="button" class="todolink" id="todoLink" style="display:none;"></button>
       <div class="setrow">
-        <span>Beginsaldo <span class="dim" id="startMonthLbl"></span></span>
+        <span>Saldo <span class="dim" id="startMonthLbl"></span></span>
         <button class="ghost num" id="startBtn">€0,00</button>
       </div>
       <div class="setnote" id="startNote"></div>

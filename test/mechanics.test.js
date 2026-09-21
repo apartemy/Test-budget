@@ -160,7 +160,10 @@ function check(name, cond, extra) {
   await page.fill('#pCash', '50');
   await page.click('#pSave');
   check('start: button reflects both pots', (await page.textContent('#startBtn')).includes('1.000,00'), await page.textContent('#startBtn'));
-  check('start: note says handmatig', (await page.textContent('#startNote')).includes('Handmatig'));
+  check('start: note says ijkpunt', (await page.textContent('#startNote')).includes('IJkpunt'),
+    await page.textContent('#startNote'));
+  check('start: de ledger toont het vastgezette saldo',
+    (await page.textContent('#carryRow')).includes('ijkpunt'), await page.textContent('#carryRow'));
 
   // ---- forward months carry the chain (the startBalance fix)
   // De maandknoppen zijn weg; de doorrekening zelf blijft wél belangrijk,

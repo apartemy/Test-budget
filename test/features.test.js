@@ -118,6 +118,11 @@ const MONTHS = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli',
   check('theme: system clears the attribute', (await page.getAttribute('html', 'data-theme')) === null);
 
   // ---- export reminder
+  // Het bolletje staat voor alles wat nog moet gebeuren, dus eerst de
+  // openstaande vaste last afvinken; wat overblijft gaat puur over exporteren.
+  await page.click('#menuClose');
+  await page.click('#expList .check');
+  await page.click('#menuBtn');
   check('export: nudge shows while nothing was exported', await page.isVisible('#setNudge'));
   check('export: note says never', (await page.textContent('#exportNote')).includes('Nog nooit'), await page.textContent('#exportNote'));
   await page.evaluate(() => {

@@ -203,6 +203,12 @@ function startBalance(k,depth){
 }
 function endBalance(k,depth){
   const c=calc(k,depth);
+  /* Een voorbije maand rolt door met wat er werkelijk is gebeurd: ontvangen
+     inkomsten en afgevinkte lasten. De lopende en komende maanden rollen door
+     met wat er gepland staat, want daar moet alles nog gebeuren.
+     Gevolg: een vergeten vinkje in een voorbije maand laat het geld staan en
+     tilt elk saldo erna op. Daar is de herinneringsbalk voor. */
+  if(k<TODAY_YM)return{d:c.availD,c:c.availC};
   return{d:c.start.d+c.incExpD-c.fixPlanD-c.varD-c.savD,c:c.start.c+c.incExpC-c.fixPlanC-c.varC-c.savC};
 }
 function calc(k,depth){
@@ -275,9 +281,14 @@ function render(){
 
   $("today").textContent=NOW.getDate()+" "+MONTHS[NOW.getMonth()];
   $("mname").innerHTML=MONTHS[p.m]+'<span class="yr num">'+p.y+"</span>";
+  const atNow=(k===TODAY_YM);
+  $("today").style.display=atNow?"":"none";
+  $("jumpNow").style.display=atNow?"none":"";
 
   $("heroLbl").textContent=(k===TODAY_YM)?"Beschikbaar nu":(k<TODAY_YM?"Eindsaldo van die maand":"Verwacht beschikbaar");
-  const live=(k===TODAY_YM);
+  /* voorbij en lopend tonen wat er werkelijk staat, komend wat er verwacht
+     wordt; dezelfde lijn die endBalance aanhoudt */
+  const live=(k<=TODAY_YM);
   const heroVal=live?c.available:c.free;
   $("heroBig").innerHTML=eurBig(heroVal);
   $("heroBig").className="big num"+(heroVal<0?" neg":"");
@@ -425,14 +436,30 @@ function render(){
     ? eur(savSum)
     : eur(savSum)+"  ·  "+eur(c.savMonth)+" deze maand";
 
+  /* waar deze maand mee begon */
+  const explicit=hasStart(k);
+  const carryTotal=c.start.d+c.start.c;
+  const carry=$("carryRow");
+  if(explicit||carryTotal!==0){
+    carry.style.display="";
+    $("carryLbl").innerHTML=explicit
+      ? 'Saldo vastgezet<span class="tag exc">ijkpunt</span>'
+      : "Meegenomen uit "+ymLabel(ymShift(k,-1));
+    $("carryAmt").textContent=eur(carryTotal);
+  }else{
+    carry.style.display="none";
+  }
+
   /* instellingen */
   $("startMonthLbl").textContent=ymLabel(k);
   $("startBtn").textContent=eur(c.start.d)+" + "+eur(c.start.c)+" contant";
-  const explicit=hasStart(k);
-  $("startPrompt").style.display=(!explicit&&c.start.d===0&&c.start.c===0)?"block":"none";
+  /* Eén keer vragen, niet elke maand: zodra er ergens een ijkpunt staat rolt
+     de rest vanzelf door, en een maandelijkse prompt zou die keten juist
+     telkens opnieuw doorknippen. */
+  $("startPrompt").style.display=(!anyAnchor()&&k===TODAY_YM)?"block":"none";
   $("startNote").textContent=explicit
-    ? "Handmatig ingesteld. Dit is het bedrag waarmee de maand begint."
-    : "Automatisch overgenomen uit de vorige maand. Tik om je werkelijke saldo in te vullen.";
+    ? "IJkpunt: hiermee begint deze maand, en vanaf hier rolt alles door."
+    : "Meegenomen uit de vorige maand. Bijstellen kan als het uit de pas loopt met je bank.";
 
   const theme=THEMES.includes(state.theme)?state.theme:"system";
   $("thSystem").classList.toggle("on",theme==="system");
@@ -444,7 +471,21 @@ function render(){
     ? "Laatst geëxporteerd op "+fullDate(fromISO(state.lastExport))+(stale?". Dat is alweer even geleden.":".")
     : (hasAnyData()?"Nog nooit geëxporteerd.":"");
   $("exportNote").className="setnote"+(stale?" warn":"");
-  $("setNudge").style.display=stale?"inline-block":"none";
+
+  renderTodo(c,k);
+  const todo=openWork();
+  $("setNudge").style.display=(stale||todo.length)?"inline-block":"none";
+  const link=$("todoLink");
+  if(todo.length){
+    const first=todo[0];
+    link.style.display="";
+    link.textContent=todo.length===1
+      ? "1 post staat nog open in "+ymLabel(first.ym)
+      : todo.length+" posten staan nog open, de oudste in "+ymLabel(first.ym);
+    link.dataset.ym=first.ym;
+  }else{
+    link.style.display="none";
+  }
 
   $("txDate").innerHTML=txDate?dayLabel(fromISO(txDate)):'<span class="ph">Datum</span>';
   $("txPay").textContent=txPay==="cash"?"Contant":"Rekening";
@@ -457,12 +498,74 @@ function hasAnyData(){
       return m.tx.length||m.oneoff.length||m.start;
     }));
 }
+/* staat er ergens een handmatig vastgezet saldo? zo ja, dan rolt de rest
+   vanzelf door en hoeft de app er niet meer om te vragen */
+function anyAnchor(){
+  return Object.keys(state.months).some(hasStart);
+}
+/* laatste maand met een ijkpunt tot en met vandaag; daarvoor doet niets er
+   meer toe, want daar is het saldo opnieuw vastgesteld */
+function anchorMonth(){
+  const anchors=Object.keys(state.months).filter(k=>hasStart(k)&&k<=TODAY_YM);
+  return anchors.length?anchors.reduce((a,b)=>a>b?a:b):null;
+}
+/* Vaste lasten die op of vóór vandaag vielen en nog niet zijn afgevinkt.
+   Dit is precies wat het doorgerolde saldo optilt, dus dit voedt zowel de
+   balk als het bolletje op de hamburger. Oudste eerst. */
+function openWork(){
+  const out=[];
+  let k=anchorMonth()||firstMonth();
+  if(!k)return out;
+  /* nooit verder terug dan een jaar, anders wordt het een eindeloze lijst */
+  const floor=ymShift(TODAY_YM,-12);
+  if(k<floor)k=floor;
+  for(let i=0;i<=12&&k<=TODAY_YM;i++,k=ymShift(k,1)){
+    calc(k).exp.forEach(x=>{
+      if(x.paid||!x.date||startOfDay(x.date)>NOW)return;
+      out.push({ym:k,item:x});
+    });
+  }
+  return out;
+}
 /* pas zeuren als er iets te verliezen valt */
 function exportIsStale(){
   if(!hasAnyData())return false;
   if(!state.lastExport)return true;
   const days=(NOW-startOfDay(fromISO(state.lastExport)))/86400000;
   return days>EXPORT_STALE_DAYS;
+}
+
+/* Wat er in de maand die je bekijkt nog moet gebeuren: lasten die eraan
+   komen, en lasten die al voorbij zijn zonder vinkje. Die laatste groep is
+   het vangnet onder de doorrekening, want die houdt het geld op je saldo. */
+const SOON_DAYS=7;
+function renderTodo(c,k){
+  const soon=new Date(NOW.getFullYear(),NOW.getMonth(),NOW.getDate()+SOON_DAYS);
+  const open=[],ahead=[];
+  c.exp.forEach(x=>{
+    if(x.paid||!x.date)return;
+    const d=startOfDay(x.date);
+    if(d<=NOW)open.push(x);
+    else if(d<=soon)ahead.push(x);
+  });
+  const bar=$("todoBar");
+  if(!open.length&&!ahead.length){bar.style.display="none";bar.innerHTML="";return;}
+  const group=(label,items,note)=>
+    '<div class="glabel"><span>'+label+'</span><span class="num">'+
+    eur(items.reduce((s,x)=>s+x.amount,0))+"</span></div>"+
+    items.map(x=>
+      '<div class="row">'+
+      '<button class="check" data-toggle="paid" data-id="'+x.id+
+      '" aria-pressed="false" aria-label="Markeer als betaald">✓</button>'+
+      '<div class="rinfo"><div class="rname">'+esc(x.label)+"</div>"+
+      '<div class="rsub">'+note(x)+"</div></div>"+
+      '<div class="ramt num">'+eur(x.amount)+"</div></div>"
+    ).join("");
+  let h="";
+  if(open.length)h+=group("Staat nog open",open,x=>dayLabel(x.date)+" · niet afgevinkt");
+  if(ahead.length)h+=group("Komt eraan",ahead,x=>dayLabel(x.date));
+  bar.innerHTML=h;
+  bar.style.display="";
 }
 
 /* bedrag plus de negatief-opmaak in één keer */
@@ -559,20 +662,36 @@ document.addEventListener("keydown",e=>{
 let calCtx=null, calMonth=null;
 function openCal(opts){
   calCtx=opts;
-  calMonth=opts.value?ymOfDate(fromISO(opts.value)):(opts.month||view);
+  /* de waarde is een maandsleutel bij de maandkiezer, een datum bij een
+     datum, en een dagnummer bij "dag van de maand"; alleen dat middelste
+     geval zegt iets over welke maand we moeten openslaan */
+  calMonth=(opts.mode==="month")?(opts.value||opts.month||view)
+    :(opts.mode==="date"&&opts.value)?ymOfDate(fromISO(opts.value))
+    :(opts.month||view);
   drawCal();
   enterDialog("calveil","calBox",closeCal);
 }
 function drawCal(){
   const grid=$("cGrid"), dow=$("cDow"), title=$("cTitle");
-  const dayMode=(calCtx.mode==="day");
-  /* welk raster we tekenen staat los van of je van maand mag wisselen:
-     met lockMonth blijf je in de maand die op het scherm staat */
+  const dayMode=(calCtx.mode==="day"), monthMode=(calCtx.mode==="month");
+  /* welk raster we tekenen staat los van of de pijlen iets doen: bij een
+     datum stappen ze een maand, bij de maandkiezer een jaar, en met
+     lockMonth blijf je in de maand die op het scherm staat */
   const showNav=!dayMode&&!calCtx.lockMonth;
   $("cPrev").style.visibility=showNav?"visible":"hidden";
   $("cNext").style.visibility=showNav?"visible":"hidden";
   let h="";
-  if(dayMode){
+  if(monthMode){
+    const year=ymParse(calMonth).y;
+    title.textContent=year;
+    dow.innerHTML="";
+    for(let m=0;m<12;m++){
+      const k=ymKey(year,m);
+      h+='<button class="cell wide'+(k===TODAY_YM?" now":"")+(k===calCtx.value?" sel":"")+
+        '" data-ym="'+k+'">'+MONTHS[m].slice(0,3)+"</button>";
+    }
+    $("cToday").textContent="Deze maand";
+  }else if(dayMode){
     title.textContent="Dag van de maand";
     dow.innerHTML="";
     for(let d=1;d<=31;d++){
@@ -593,20 +712,25 @@ function drawCal(){
     }
     $("cToday").textContent="Vandaag";
   }
+  grid.className=monthMode?"grid months":"grid";
   grid.innerHTML=h;
   $("cClear").style.display=calCtx.clearable===false?"none":"";
 }
 function closeCal(){if(!calCtx)return;calCtx=null;leaveDialog("calveil");}
 /* geeft de gekozen waarde door en sluit; calCtx is daarna leeg */
 function pickCal(val){const f=calCtx.onPick;closeCal();f(val);}
-$("cPrev").onclick=()=>{calMonth=ymShift(calMonth,-1);drawCal();};
-$("cNext").onclick=()=>{calMonth=ymShift(calMonth,1);drawCal();};
+/* de pijlen stappen een jaar in de maandkiezer en een maand in de kalender */
+const calStep=n=>{calMonth=ymShift(calMonth,calCtx.mode==="month"?n*12:n);drawCal();};
+$("cPrev").onclick=()=>calStep(-1);
+$("cNext").onclick=()=>calStep(1);
 $("cClear").onclick=()=>pickCal(null);
-$("cToday").onclick=()=>pickCal(calCtx.mode==="day"?NOW.getDate():isoOf(NOW));
+$("cToday").onclick=()=>pickCal(
+  calCtx.mode==="day"?NOW.getDate():calCtx.mode==="month"?TODAY_YM:isoOf(NOW));
 $("cGrid").addEventListener("click",e=>{
-  const b=e.target.closest("button[data-iso],button[data-day]");
+  const b=e.target.closest("button[data-iso],button[data-day],button[data-ym]");
   if(!b)return;
-  pickCal(b.dataset.iso?b.dataset.iso:parseInt(b.dataset.day,10));
+  if(b.dataset.ym)pickCal(b.dataset.ym);
+  else pickCal(b.dataset.iso?b.dataset.iso:parseInt(b.dataset.day,10));
 });
 $("calveil").addEventListener("click",e=>{if(e.target.id==="calveil")closeCal();});
 
@@ -1043,6 +1167,8 @@ $("addCat").onclick=()=>openPanel("newcat");
 $("addSav").onclick=()=>openPanel("newsav");
 $("startBtn").onclick=()=>openPanel("start");
 $("startPrompt").onclick=()=>openPanel("start");
+$("carryRow").onclick=()=>openPanel("start");
+$("todoLink").onclick=e=>{closeMenu();goMonth(e.currentTarget.dataset.ym);};
 
 let txDate=null, txPay="digital";
 
@@ -1159,6 +1285,14 @@ $("wipeBtn").onclick=()=>ask({
   onOk:()=>replaceState(seed(),"Alles gewist")
 });
 
+/* ---------- door de maanden ---------- */
+function goMonth(k){view=k;render();}
+$("prevM").onclick=()=>goMonth(ymShift(view,-1));
+$("nextM").onclick=()=>goMonth(ymShift(view,1));
+$("jumpNow").onclick=()=>goMonth(TODAY_YM);
+$("mname").onclick=()=>openCal({mode:"month",value:view,month:view,clearable:false,
+  onPick:v=>{if(v)goMonth(v);}});
+
 /* ---------- weergave ---------- */
 function applyTheme(){
   const t=THEMES.includes(state.theme)?state.theme:"system";
@@ -1221,8 +1355,10 @@ $("menuveil").addEventListener("click",e=>{if(e.target.id==="menuveil")closeMenu
     /* duidelijk horizontaal, anders is het gewoon scrollen */
     if(Math.abs(dx)<SLOP||Math.abs(dx)<Math.abs(dy)*2)return;
     if(menuOpen){if(dx<0)closeMenu();return;}
-    /* alleen vanaf de rand, anders opent de lade bij elke zijwaartse beweging */
-    if(dx>0&&from<=EDGE)openMenu();
+    /* vanaf de rand naar rechts hoort bij de lade, al het andere bladert
+       door de maanden */
+    if(dx>0&&from<=EDGE){openMenu();return;}
+    goMonth(ymShift(view,dx<0?1:-1));
   }
   [document.querySelector(".wrap"),$("menuveil")].forEach(el=>{
     el.addEventListener("touchstart",start,{passive:true});

@@ -23,11 +23,49 @@ const MONTHS = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli',
     await page.reload();
     await page.waitForFunction(() => document.getElementById('mname').textContent.length > 0);
 
-    for (const id of ['prevM', 'nextM', 'jumpNow']) {
-      check('geen knop #' + id + ' meer', (await page.locator('#' + id).count()) === 0);
-    }
-    check('geen maandbalk meer', (await page.locator('.monthbar').count()) === 0);
     const now = new Date();
+    const label = () => page.textContent('#mname');
+    const monthOf = n => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + n); return d; };
+
+    check('geen aparte maandbalk, alles zit in de kop', (await page.locator('.monthbar').count()) === 0);
+    check('geen knop "Nu" zolang je op deze maand staat', !(await page.isVisible('#jumpNow')));
+    check('de datum van vandaag staat er wel', await page.isVisible('#today'));
+
+    // ---- pijlen
+    await page.click('#nextM');
+    check('pijl vooruit gaat een maand verder',
+      (await label()).includes(MONTHS[monthOf(1).getMonth()]), await label());
+    check('knop "Nu" verschijnt zodra je weg bent', await page.isVisible('#jumpNow'));
+    check('de datum van vandaag maakt er plaats voor', !(await page.isVisible('#today')));
+    check('de kop zegt dat het een verwachting is',
+      (await page.textContent('#heroLbl')) === 'Verwacht beschikbaar', await page.textContent('#heroLbl'));
+    await page.click('#prevM');
+    await page.click('#prevM');
+    check('twee keer terug komt op vorige maand uit',
+      (await label()).includes(MONTHS[monthOf(-1).getMonth()]), await label());
+    check('een voorbije maand toont het eindsaldo',
+      (await page.textContent('#heroLbl')) === 'Eindsaldo van die maand', await page.textContent('#heroLbl'));
+    await page.click('#jumpNow');
+    check('"Nu" brengt je terug naar deze maand',
+      (await label()).includes(MONTHS[now.getMonth()]), await label());
+
+    // ---- maandkiezer
+    await page.click('#mname');
+    check('maandkiezer opent', await page.isVisible('#calveil.open'));
+    check('maandkiezer toont het jaar', (await page.textContent('#cTitle')) === String(now.getFullYear()),
+      await page.textContent('#cTitle'));
+    check('maandkiezer toont twaalf maanden', (await page.locator('.cal button[data-ym]').count()) === 12);
+    await page.click('#cNext');
+    check('de pijl stapt een heel jaar', (await page.textContent('#cTitle')) === String(now.getFullYear() + 1));
+    await page.click('#cPrev');
+    const target = MONTHS.indexOf(MONTHS[(now.getMonth() + 5) % 12]);
+    await page.click('.cal button[data-ym$="_' + String(target + 1).padStart(2, '0') + '"]');
+    check('een maand kiezen springt erheen', (await label()).includes(MONTHS[target]), await label());
+    await page.click('#mname');
+    await page.click('#cToday');
+    check('"Deze maand" in de kiezer brengt je terug',
+      (await label()).includes(MONTHS[now.getMonth()]), await label());
+
     check('kop toont de lopende maand',
       (await page.textContent('#mname')).includes(MONTHS[now.getMonth()]), await page.textContent('#mname'));
     check('kop toont het jaar', (await page.textContent('#mname')).includes(String(now.getFullYear())));

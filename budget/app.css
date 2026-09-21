@@ -50,13 +50,24 @@ button{font-family:inherit;}
 .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;}
 
 .masthead{
-  display:flex;align-items:center;gap:12px;
+  display:flex;align-items:center;gap:2px;
   border-bottom:1px solid rgba(246,237,230,.09);
   padding-bottom:10px;margin-bottom:18px;
 }
-.masthead h1{font-family:var(--serif);font-size:26px;font-weight:500;margin:0;letter-spacing:-0.01em;color:var(--on-dark);}
-.masthead .mname .yr{color:var(--on-dark-soft);font-size:17px;margin-left:7px;}
-.masthead .today{font-size:12px;color:var(--on-dark-soft);margin-left:auto;white-space:nowrap;}
+.masthead h1{margin:0;min-width:0;}
+.masthead .mname button{
+  font-family:var(--serif);font-size:20px;font-weight:500;letter-spacing:-0.01em;
+  border:none;background:transparent;color:var(--on-dark);
+  padding:4px 2px;cursor:pointer;white-space:nowrap;
+}
+.masthead .mname .yr{color:var(--on-dark-soft);font-size:15px;margin-left:6px;}
+.masthead .today,.masthead .todaybtn{margin-left:auto;white-space:nowrap;}
+.masthead .today{font-size:12px;color:var(--on-dark-soft);}
+.todaybtn{
+  border:1px solid var(--line-dark);background:transparent;color:var(--on-dark);
+  font-size:11px;padding:4px 9px;border-radius:99px;cursor:pointer;
+}
+.todaybtn:active{background:rgba(246,237,230,.12);}
 .burger{
   width:38px;height:38px;min-width:38px;margin-left:-8px;
   border:none;background:transparent;color:var(--on-dark);
@@ -83,6 +94,15 @@ button{font-family:inherit;}
 .ledger .lbl{font-size:11.5px;color:var(--ink-soft);margin-bottom:2px;}
 .big{font-family:var(--serif);font-size:44px;line-height:1.05;font-weight:500;letter-spacing:-0.02em;color:var(--wine);}
 .big .cents{font-size:20px;opacity:.6;margin-left:1px;}
+/* waar deze maand mee begon: meegenomen uit de vorige, of een eigen ijkpunt */
+.carry{
+  display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+  width:100%;margin-top:12px;padding:8px 0 0;
+  border:none;border-top:1px solid var(--line);background:transparent;
+  color:var(--ink-soft);font-family:inherit;font-size:12px;text-align:left;cursor:pointer;
+}
+.carry .num{font-weight:600;color:var(--ink);}
+.carry .tag{margin-left:6px;}
 .split{display:flex;margin-top:16px;padding-top:14px;border-top:1px solid var(--line);}
 .split>div{flex:1;}
 .split>div+div{border-left:1px solid var(--line);padding-left:14px;}
@@ -95,6 +115,16 @@ button{font-family:inherit;}
   border:1px dashed var(--line-strong);border-radius:var(--r);
   background:transparent;color:var(--wine);font-size:12.5px;text-align:left;cursor:pointer;
 }
+
+/* wat er nog moet gebeuren in de maand die je bekijkt */
+.todo{
+  margin-top:10px;background:var(--cream);color:var(--ink);
+  border-radius:var(--r);overflow:hidden;
+  box-shadow:inset 0 0 0 1px rgba(224,166,60,.55);
+}
+.todo .glabel{background:rgba(224,166,60,.16);color:var(--amber);font-weight:600;}
+.todo .row{padding:10px 14px;}
+.todo .rname{font-size:14px;}
 
 .meters{margin:16px 0 26px;}
 .meter+.meter{margin-top:12px;}
@@ -210,6 +240,14 @@ section{margin-bottom:28px;}
 .drawerhead h2{font-family:var(--serif);font-size:20px;font-weight:500;margin:0;color:var(--on-dark);}
 .drawerhead .x{color:var(--on-dark-soft);}
 .drawerhead .x:active{background:rgba(246,237,230,.12);color:var(--on-dark);}
+/* waar het oranje bolletje op de hamburger over gaat */
+.todolink{
+  width:100%;text-align:left;padding:10px 12px;cursor:pointer;
+  border:1px solid rgba(224,166,60,.45);border-radius:8px;
+  background:rgba(224,166,60,.12);color:#E8C07A;
+  font-family:inherit;font-size:13px;font-weight:500;
+}
+.todolink:active{background:rgba(224,166,60,.2);}
 .setgrid{display:flex;flex-direction:column;gap:11px;}
 .setrow{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:14px;}
 .ghost{
@@ -293,6 +331,9 @@ section{margin-bottom:28px;}
 .dow{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:4px;}
 .dow span{text-align:center;font-size:10.5px;color:var(--ink-faint);}
 .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;}
+/* twaalf maanden passen niet in zeven kolommen */
+.grid.months{grid-template-columns:repeat(3,1fr);gap:6px;}
+.cell.wide{aspect-ratio:auto;padding:13px 4px;font-size:14px;}
 .cell{
   aspect-ratio:1;border:none;background:transparent;color:var(--ink);
   font-size:13.5px;border-radius:8px;cursor:pointer;font-family:inherit;
